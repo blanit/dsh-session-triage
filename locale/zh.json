@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "会话收件箱",
+    "description": "参考 T3 Code 的扁平会话列表与 Working、Snoozed、Settled 底部收纳区。本版界面优先使用英文，可切回原生侧栏。"
+  }
+}
