@@ -58,4 +58,4 @@ Visual baseline: [the official T3 Code product screenshot](https://github.com/pi
 
 Layout and interaction reference: [Sidebar](https://github.com/pingdotgg/t3code/blob/6647b0a761ff7a1287047a9bb5fd5b63772f456b/apps/web/src/components/Sidebar.tsx), [SidebarThreadRow](https://github.com/pingdotgg/t3code/blob/6647b0a761ff7a1287047a9bb5fd5b63772f456b/apps/web/src/components/sidebar/SidebarThreadRow.tsx), and [thread sidebar guide](https://github.com/pingdotgg/t3code/blob/6647b0a761ff7a1287047a9bb5fd5b63772f456b/docs/user/thread-sidebar.md), pinned to commit `6647b0a761ff7a1287047a9bb5fd5b63772f456b` (2026-11-09).
 
-The plugin and its original icons are independently implemented under MIT. No T3 Code source is bundled in the plugin distribution. Public reference files remain outside the package's distribution file list.
+The plugin and its original icons are independently implemented under MIT. The new-session glyph follows DSH's native `IconNewChatOutlineMedium` geometry and its 16-unit grid. No T3 Code source is bundled in the plugin distribution. Public reference files remain outside the package's distribution file list.

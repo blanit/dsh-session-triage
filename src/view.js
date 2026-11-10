@@ -3,30 +3,33 @@ function createPlugin(React, model, dictionaries, css) {
   const NS = 'local.sessionTriage';
   const KEY = 'dsh.local.session-triage.v1';
   const identity = value => value;
+  // Draw rounded silhouettes, rather than relying on round joins to soften square paths.
   const glyphs = {
-    inbox: ['M3 4h18v13H3z', 'M3 12h5l2 3h4l2-3h5'],
-    search: ['M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13', 'm16 16 5 5'],
-    compose: ['M12 4H5a2 2 0 0 0-2 2v13h13v-7', 'm15 3 6 6', 'M10 14l2-6 6-6 4 4-6 6z'],
-    folder: ['M3 7h7l2 2h9v11H3z', 'M3 7V4h7l2 3'],
-    folderPlus: ['M3 7h7l2 2h9v11H3z', 'M3 7V4h7l2 3', 'M12 12v6', 'M9 15h6'],
-    close: ['m6 6 12 12', 'M18 6 6 18'],
-    more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'],
-    classic: ['M4 4h16v16H4z', 'M9 4v16', 'M12 9h5', 'M12 14h5'],
-    settings: ['M4 7h16', 'M4 17h16', 'M8 4v6', 'M16 14v6'],
-    filter: ['M4 6h16', 'M7 12h10', 'M10 18h4'],
-    check: ['m5 12 4 4L19 6'],
-    chevron: ['m9 6 6 6-6 6'],
-    clock: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18', 'M12 7v5l3 2'],
-    pin: ['M9 3h6l-1 6 4 4H6l4-4z', 'M12 13v8'],
-    undo: ['M8 4 3 9l5 5', 'M3 9h11a6 6 0 0 1 0 12'],
-    spinner: ['M12 3a9 9 0 1 1-9 9'],
-    alert: ['M12 3 2 21h20z', 'M12 9v5', 'M12 17h.01'],
+    inbox: ['M7 4.5h10a2 2 0 0 1 1.9 1.4l2 6.2a3 3 0 0 1 .1.9v4.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V13a3 3 0 0 1 .1-.9l2-6.2A2 2 0 0 1 7 4.5Z', 'M3.5 12h3.8a1.5 1.5 0 0 1 1.4 1l.3 1a1.5 1.5 0 0 0 1.4 1h3.2a1.5 1.5 0 0 0 1.4-1l.3-1a1.5 1.5 0 0 1 1.4-1h3.8'],
+    search: ['M17.5 10.75a6.75 6.75 0 1 1-13.5 0 6.75 6.75 0 0 1 13.5 0Z', 'm15.75 15.75 4.5 4.5'],
+    // Native DSH new-chat outline, retaining its 16-unit grid and centered plus.
+    compose: ['M2.37091 11.2501C1.58745 9.89288 1.32067 8.29835 1.61969 6.76006C1.91872 5.22177 2.76342 3.8433 3.99826 2.87846C5.2331 1.91362 6.77494 1.42737 8.33988 1.50925C9.90482 1.59113 11.3875 2.23562 12.5149 3.32406C13.6425 4.41269 14.3387 5.87206 14.4754 7.4334C14.612 8.99474 14.18 10.5529 13.2587 11.8209C12.3375 13.0888 10.9891 13.9813 9.46194 14.3337C8.18691 14.628 6.85895 14.5294 5.64989 14.0605C5.1712 13.8748 4.76962 13.4932 4.26534 13.3967C3.67413 13.2835 2.95257 13.5598 2.03794 14.3337', 'M8 5V11', 'M5 8H11'],
+    folder: ['M3 8V6.5a2 2 0 0 1 2-2h3.2a2 2 0 0 1 1.4.6l1.8 1.8a2 2 0 0 0 1.4.6H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z'],
+    folderPlus: ['M3 8V6.5a2 2 0 0 1 2-2h3.2a2 2 0 0 1 1.4.6l1.8 1.8a2 2 0 0 0 1.4.6H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z', 'M12 10.5v6', 'M9 13.5h6'],
+    close: ['m7 7 10 10', 'M17 7 7 17'],
+    more: ['M6.5 12a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Z', 'M13.25 12a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Z', 'M20 12a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Z'],
+    classic: ['M7 3.5h10A3.5 3.5 0 0 1 20.5 7v10a3.5 3.5 0 0 1-3.5 3.5H7A3.5 3.5 0 0 1 3.5 17V7A3.5 3.5 0 0 1 7 3.5Z', 'M9 4v16', 'M12.5 9h4', 'M12.5 14h4'],
+    settings: ['M4 7h4m4 0h8', 'M4 17h8m4 0h4', 'M12 7a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z', 'M16 17a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z'],
+    filter: ['M4.5 6.5h15', 'M7.5 12h9', 'M10 17.5h4'],
+    check: ['m5.5 12 3.7 3.7a.8.8 0 0 0 1.1 0L18.5 7.5'],
+    chevron: ['m9 6.5 4.8 4.8a1 1 0 0 1 0 1.4L9 17.5'],
+    clock: ['M20.5 12a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0Z', 'M12 7.5v4a1 1 0 0 0 .5.9l3 1.6'],
+    pin: ['M8.5 4h7', 'M9 4v4.5a2 2 0 0 1-.6 1.4l-1.8 1.8a1.5 1.5 0 0 0-.4 1.1v.2a1 1 0 0 0 1 1h9.6a1 1 0 0 0 1-1v-.2a1.5 1.5 0 0 0-.4-1.1l-1.8-1.8a2 2 0 0 1-.6-1.4V4', 'M12 14v6'],
+    undo: ['m7.5 5.5-3.1 3.1a1 1 0 0 0 0 1.4l3.1 3.1', 'M4.5 9.3H14a5.5 5.5 0 0 1 0 11h-2'],
+    spinner: ['M12 3.5a8.5 8.5 0 1 1-8.5 8.5'],
+    alert: ['M10.3 4.5a2 2 0 0 1 3.4 0l7 12.5a2 2 0 0 1-1.7 3H5a2 2 0 0 1-1.7-3l7-12.5Z', 'M12 9v4', 'M12 16.5h.01'],
   };
   function Icon({ name = 'inbox', size = 16 }) {
-    return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, className: name === 'spinner' ? 'dst-spinner' : undefined }, ...glyphs[name].map((d, i) => h('path', { key: i, d })));
+    const nativeChat = name === 'compose';
+    return h('svg', { width: size, height: size, viewBox: nativeChat ? '0 0 16 16' : '0 0 24 24', fill: name === 'more' ? 'currentColor' : 'none', stroke: name === 'more' ? 'none' : 'currentColor', strokeWidth: nativeChat ? 1.3 : 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, focusable: false, className: name === 'spinner' ? 'dst-glyph dst-spinner' : 'dst-glyph' }, ...glyphs[name].map((d, i) => h('path', { key: i, d })));
   }
   function iconButton(name, label, onClick, extra = {}) {
-    return h('button', { type: 'button', className: 'dst-icon', title: label, 'aria-label': label, onClick, ...extra }, h(Icon, { name, size: 15 }));
+    return h('button', { type: 'button', className: 'dst-icon', title: label, 'aria-label': label, onClick, ...extra }, h(Icon, { name, size: 16 }));
   }
   function age(time, now, t) {
     const minutes = Math.floor(Math.max(0, now - time) / 60000);
@@ -42,23 +45,40 @@ function createPlugin(React, model, dictionaries, css) {
     return workspace?.title === 'default-workspace' ? t('defaultWorkspace') : workspace?.title || t('ungrouped');
   }
   function rowTitle(row, t) { return row.blank ? t('draft') : row.title || t('untitled'); }
-  function Popover({ label, icon, active, children, align = 'right', className = '' }) {
+  function Popover({ label, icon, active, children, align = 'right', className = '', submenu = false, picker = false, value, description }) {
     const [open, setOpen] = React.useState(false);
     const root = React.useRef(null);
     const button = React.useRef(null);
     const menu = React.useRef(null);
+    const focusEntry = React.useRef(null);
+    const menuId = React.useId();
     const [position, setPosition] = React.useState({ left: 0, top: 0 });
     React.useLayoutEffect(() => {
       if (!open || !menu.current || !button.current) return;
       const element = menu.current;
       element.showPopover();
-      const anchor = button.current.getBoundingClientRect();
-      const box = element.getBoundingClientRect();
-      const left = align === 'left' ? anchor.left : anchor.right - box.width;
-      const top = anchor.bottom + box.height + 6 <= window.innerHeight ? anchor.bottom + 5 : Math.max(8, anchor.top - box.height - 5);
-      setPosition({ left: Math.max(8, Math.min(left, window.innerWidth - box.width - 8)), top });
-      return () => { if (element.matches(':popover-open')) element.hidePopover(); };
-    }, [open, align]);
+      const place = () => {
+        const anchor = button.current.getBoundingClientRect();
+        const box = element.getBoundingClientRect();
+        let left = submenu ? anchor.right + 5 : align === 'left' ? anchor.left : anchor.right - box.width;
+        if (submenu && left + box.width > window.innerWidth - 8) left = anchor.left - box.width - 5;
+        let top = submenu ? anchor.top : anchor.bottom + 6;
+        if (top + box.height > window.innerHeight - 8) top = submenu ? window.innerHeight - box.height - 8 : anchor.top - box.height - 6;
+        left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8));
+        top = Math.max(8, top);
+        setPosition(previous => previous.left === left && previous.top === top ? previous : { left, top });
+      };
+      place();
+      const resize = new ResizeObserver(place);
+      resize.observe(element);
+      if (focusEntry.current) {
+        const entries = [...element.querySelectorAll('[role^="menuitem"]:not(:disabled)')];
+        const entry = focusEntry.current === 'last' ? entries.at(-1) : entries.find(item => item.getAttribute('aria-checked') === 'true') || entries[0];
+        entry?.focus();
+        focusEntry.current = null;
+      }
+      return () => { resize.disconnect(); if (element.matches(':popover-open')) element.hidePopover(); };
+    }, [open, align, submenu]);
     React.useEffect(() => {
       if (!open) return;
       const outside = event => { if (!root.current?.contains(event.target)) setOpen(false); };
@@ -69,18 +89,30 @@ function createPlugin(React, model, dictionaries, css) {
       window.addEventListener('resize', resize);
       return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('scroll', scroll, true); window.removeEventListener('resize', resize); };
     }, [open]);
-    return h('div', { ref: root, className: 'dst-popover ' + className, 'data-open': open, onKeyDown: event => {
-      if (event.key === 'Escape' && open) { event.stopPropagation(); setOpen(false); button.current?.focus(); }
-      if (open && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) && event.target.tagName !== 'INPUT' && event.target.tagName !== 'SELECT') {
-        const items = [...root.current.querySelectorAll('[role^="menuitem"]:not(:disabled)')];
-        if (items.length) { event.preventDefault(); const index = items.indexOf(document.activeElement); const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length; items[next].focus(); }
+    const trigger = {
+      ref: button, 'aria-haspopup': 'menu', 'aria-expanded': open, 'aria-controls': open ? menuId : undefined, 'data-active': active || open,
+      onKeyDown: event => {
+        if (!open && (submenu ? event.key === 'ArrowRight' : ['ArrowDown', 'ArrowUp'].includes(event.key))) {
+          event.preventDefault(); event.stopPropagation(); focusEntry.current = event.key === 'ArrowUp' ? 'last' : 'first'; setOpen(true);
+        }
+      },
+    };
+    return h('div', { ref: root, className: 'dst-popover ' + (submenu ? 'dst-submenu ' : '') + className, 'data-open': open, onKeyDown: event => {
+      if ((event.key === 'Escape' || (submenu && event.key === 'ArrowLeft')) && open) {
+        event.preventDefault(); event.stopPropagation(); setOpen(false); button.current?.focus(); return;
+      }
+      if (event.key === 'Tab' && open) setOpen(false);
+      if (open && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) && event.target.closest('[role="menu"]') === menu.current && !event.target.closest('input,select')) {
+        const items = [...menu.current.querySelectorAll('[role^="menuitem"]:not(:disabled)')].filter(item => item.closest('[role="menu"]') === menu.current);
+        if (items.length) { event.preventDefault(); event.stopPropagation(); const index = items.indexOf(document.activeElement); const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length; items[next].focus(); }
       }
     } },
-    iconButton(icon, label, () => setOpen(value => !value), { ref: button, 'aria-haspopup': 'menu', 'aria-expanded': open, 'data-active': active, onKeyDown: event => { if (event.key === 'ArrowDown' && !open) { event.preventDefault(); setOpen(true); } } }),
-    open && h('div', { ref: menu, popover: 'manual', className: 'dst-menu', style: position, 'data-align': align, role: 'menu', 'aria-label': label }, children(() => setOpen(false))));
+    submenu ? h('button', { type: 'button', className: 'dst-menu-item dst-submenu-trigger', role: 'menuitem', title: description, onClick: event => { if (event.detail === 0) focusEntry.current = 'first'; setOpen(current => !current); }, ...trigger }, h('span', { className: 'dst-menu-label' }, label), h('span', { className: 'dst-menu-value' }, value, h(Icon, { name: 'chevron', size: 12 }))) : picker ? h('button', { type: 'button', className: 'dst-select-trigger', 'aria-label': label, onClick: event => { if (event.detail === 0) focusEntry.current = 'first'; setOpen(current => !current); }, ...trigger }, value, h('span', { className: 'dst-picker-chevron' }, h(Icon, { name: 'chevron', size: 12 }))) : iconButton(icon, label, () => setOpen(current => !current), trigger),
+    open && h('div', { id: menuId, ref: menu, popover: 'manual', className: 'dst-menu', style: position, 'data-menu-material': 'translucent', 'data-submenu': submenu, role: 'menu', 'aria-label': label }, children(() => setOpen(false))));
   }
   function menuItem(text, onClick, extra = {}) {
-    return h('button', { type: 'button', className: 'dst-menu-item', role: 'menuitem', onClick, ...extra }, text);
+    const choice = ['menuitemcheckbox', 'menuitemradio'].includes(extra.role);
+    return h('button', { type: 'button', className: 'dst-menu-item', role: 'menuitem', onClick, ...extra }, h('span', { className: 'dst-menu-label' }, text), choice && h('span', { className: 'dst-menu-check', 'aria-hidden': true }, extra['aria-checked'] && h(Icon, { name: 'check', size: 14 })));
   }
   function ModeButton({ usePrefs, setMode, t }) {
     const modern = usePrefs(p => p.mode === 'modern');
@@ -89,7 +121,7 @@ function createPlugin(React, model, dictionaries, css) {
   }
   function Setting({ usePrefs, setMode, t }) {
     const mode = usePrefs(p => p.mode);
-    return h('div', { className: 'dst-setting' }, h('div', null, h('div', { className: 'dst-setting-title' }, t('modeLabel')), h('div', { className: 'dst-setting-description' }, t('modeDescription'))), h('select', { 'aria-label': t('modeLabel'), value: mode, onChange: event => setMode(event.target.value) }, h('option', { value: 'classic' }, t('classic')), h('option', { value: 'modern' }, t('modern'))));
+    return h('div', { className: 'dst-setting' }, h('div', null, h('div', { className: 'dst-setting-title' }, t('modeLabel')), h('div', { className: 'dst-setting-description' }, t('modeDescription'))), h(Popover, { label: t('modeLabel'), picker: true, value: t(mode) }, close => h(React.Fragment, null, ...['classic', 'modern'].map(value => menuItem(t(value), () => { close(); setMode(value); }, { key: value, role: 'menuitemradio', 'aria-checked': mode === value })))));
   }
   function SessionRow({ row, selected, compact, now, t, open, openMenu, useContextMenu, act, renameSession, fail, dragging, dropBefore, onDrag, onDragEnd, onDropRow, onDragOverRow }) {
     const title = rowTitle(row, t);
@@ -259,7 +291,7 @@ function createPlugin(React, model, dictionaries, css) {
     };
     const currentSearch = visible[Math.min(searchIndex, Math.max(0, visible.length - 1))];
     const projectScope = h(Popover, { label: t('projects'), icon: 'filter', active: project !== '*', align: 'right' }, close => h(React.Fragment, null,
-      ...[{ workspaceId: '*', title: t('allProjects') }, ...workspaces.items, { workspaceId: '', title: t('ungrouped') }].map(workspace => menuItem(h(React.Fragment, null, h('span', null, workspaceName(workspace, t)), project === workspace.workspaceId && h(Icon, { name: 'check', size: 13 })), () => { setProject(workspace.workspaceId); close(); }, { key: workspace.workspaceId, role: 'menuitemradio', 'aria-checked': project === workspace.workspaceId }))));
+      ...[{ workspaceId: '*', title: t('allProjects') }, ...workspaces.items, { workspaceId: '', title: t('ungrouped') }].map(workspace => menuItem(workspaceName(workspace, t), () => { setProject(workspace.workspaceId); close(); }, { key: workspace.workspaceId, role: 'menuitemradio', 'aria-checked': project === workspace.workspaceId }))));
     if (!wide) return h('div', { className: 'dst-root dst-rail' }, iconButton('inbox', t('expand'), expandSidebar));
     return h('section', { ref: rootRef, className: 'dst-root', 'aria-label': t('sessions'), 'data-session-triage': 'modern', lang: 'en', onKeyDown: event => {
       if (!['ArrowUp', 'ArrowDown'].includes(event.key) || event.target.closest('input,select,[role="menu"]')) return;
@@ -279,10 +311,13 @@ function createPlugin(React, model, dictionaries, css) {
         h(Popover, { label: t('options'), icon: 'more' }, close => h(React.Fragment, null,
           menuItem(t('workingSection'), () => setView(p => ({ ...p, workingSection: !p.workingSection })), { role: 'menuitemcheckbox', 'aria-checked': preferences.workingSection }),
           menuItem(t('showArchived'), () => { setArchived(value => !value); close(); }, { role: 'menuitemcheckbox', 'aria-checked': archived }),
-          h('div', { className: 'dst-menu-separator' }),
-          h('label', { className: 'dst-menu-field' }, t('sort'), h('select', { value: preferences.sort, 'aria-label': t('sort'), onChange: event => setView(p => ({ ...p, sort: event.target.value, activeOrder: [] })) }, ...['newest', 'oldest'].map(value => h('option', { key: value, value }, t(value))))),
-          h('label', { className: 'dst-menu-field' }, t('autoSettle'), h('select', { value: preferences.autoSettleHours, 'aria-label': t('autoSettle'), onChange: event => setView(p => ({ ...p, autoSettleHours: Number(event.target.value) })) }, ...[[0, 'never'], [6, 'sixHours'], [24, 'oneDay'], [72, 'threeDays'], [168, 'oneWeek']].map(([value, key]) => h('option', { key: value, value }, t(key))))),
-          h('div', { className: 'dst-menu-separator' }), menuItem(t('switchClassic'), () => { close(); setMode('classic'); }), h('p', { className: 'dst-menu-hint' }, t('localHint'))))),
+          h('div', { className: 'dst-menu-separator', role: 'separator' }),
+          h('div', { className: 'dst-menu-heading', role: 'presentation' }, t('sort')),
+          ...['newest', 'oldest'].map(value => menuItem(t(value), () => { setView(p => ({ ...p, sort: value, activeOrder: [] })); close(); }, { key: value, role: 'menuitemradio', 'aria-checked': preferences.sort === value })),
+          h('div', { className: 'dst-menu-separator', role: 'separator' }),
+          h(Popover, { label: t('autoSettle'), submenu: true, description: t('localHint'), value: t(({ 0: 'never', 6: 'sixHours', 24: 'oneDay', 72: 'threeDays', 168: 'oneWeek' })[preferences.autoSettleHours]) }, closeSubmenu => h(React.Fragment, null,
+            ...[[0, 'never'], [6, 'sixHours'], [24, 'oneDay'], [72, 'threeDays'], [168, 'oneWeek']].map(([value, key]) => menuItem(t(key), () => { setView(p => ({ ...p, autoSettleHours: value })); closeSubmenu(); close(); }, { key, role: 'menuitemradio', 'aria-checked': preferences.autoSettleHours === value })))),
+          h('div', { className: 'dst-menu-separator', role: 'separator' }), menuItem(t('switchClassic'), () => { close(); setMode('classic'); })))),
       (project !== '*' || archived) && h('div', { className: 'dst-scope-line' }, h('span', null, archived ? t('archived') : workspaceName(workspaces.items.find(item => item.workspaceId === project), t)), iconButton('close', t('clear'), () => { setProject('*'); setArchived(false); })),
       saveError && h('div', { role: 'status', className: 'dst-notice dst-error' }, t('storageError')),
       note && h('div', { role: note.error ? 'alert' : 'status', className: 'dst-notice', 'data-error': note.error }, h('span', null, note.text), note.undo && h('button', { type: 'button', onClick: note.undo }, t('undo')), iconButton('close', t('close'), () => setNote(null))),
