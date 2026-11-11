@@ -1,5 +1,7 @@
-export const DEFAULTS = { mode: 'modern', workingSection: true, sort: 'newest', activeOrder: [], autoSettleHours: 24, returnedAt: {}, settled: {}, settledAt: {}, snoozed: {}, awakened: {}, collapsed: {} };
+export const DEFAULTS = { mode: 'modern', workingSection: true, sort: 'newest', activeOrder: [], autoSettleHours: 24, returnedAt: {}, done: {}, settled: {}, settledAt: {}, snoozed: {}, awakened: {}, collapsed: {}, projectIcons: {} };
 export const GROUPS = ['pinned', 'active', 'working', 'snoozed', 'settled', 'archived'];
+export const PROJECT_ICONS = ['folder', 'code', 'terminal', 'package', 'book', 'spark', 'branch', 'layers'];
+export const PROJECT_TONES = 6;
 
 export function normalizePreferences(input) {
   const value = input && typeof input === 'object' ? input : {};
@@ -11,9 +13,85 @@ export function normalizePreferences(input) {
     sort: value.sort === 'oldest' ? 'oldest' : 'newest',
     activeOrder: [...new Set((Array.isArray(value.activeOrder) ? value.activeOrder : []).filter(id => typeof id === 'string' && id.length > 0))],
     autoSettleHours: [0, 6, 24, 72, 168].includes(value.autoSettleHours) ? value.autoSettleHours : 24,
-    returnedAt: numbers(value.returnedAt), settled: numbers(value.settled), settledAt: numbers(value.settledAt), snoozed, awakened: numbers(value.awakened),
+    returnedAt: numbers(value.returnedAt), done: numbers(value.done), settled: numbers(value.settled), settledAt: numbers(value.settledAt), snoozed, awakened: numbers(value.awakened),
     collapsed: Object.fromEntries(Object.entries(value.collapsed ?? {}).filter(([key, flag]) => GROUPS.includes(key) && typeof flag === 'boolean')),
+    projectIcons: normalizeProjectIcons(value.projectIcons),
   };
+}
+
+// Per-project icon overrides stay presentation-only: an absent entry means the generated icon.
+function normalizeProjectIcons(input) {
+  const entries = Object.entries(input && typeof input === 'object' ? input : {}).slice(0, 200).flatMap(([key, entry]) => {
+    if (!key || !entry || typeof entry !== 'object') return [];
+    if (entry.kind === 'none') return [[key, { kind: 'none' }]];
+    if (entry.kind === 'icon' && PROJECT_ICONS.includes(entry.value)) return [[key, { kind: 'icon', value: entry.value }]];
+    const text = typeof entry.value === 'string' ? Array.from(entry.value.trim()).slice(0, 4).join('') : '';
+    return entry.kind === 'text' && text ? [[key, { kind: 'text', value: text }]] : [];
+  });
+  return Object.fromEntries(entries);
+}
+
+const pathBase = value => String(value ?? '').replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).at(-1) ?? '';
+
+export function projectKeyFor(row) {
+  const id = row?.workspace?.workspaceId;
+  if (id) return `workspace:${id}`;
+  return row?.cwd ? `cwd:${row.cwd}` : '';
+}
+
+// The generated icon follows the project's own path, never its transient session order.
+// Workspace snapshots may omit `path`; the owning session cwd is the next best project fact.
+export function projectSeedFor(row) {
+  return row?.workspace?.path || row?.projectSeed || row?.cwd || row?.workspace?.title || '';
+}
+
+export function projectInitials(seed) {
+  const base = pathBase(seed);
+  const words = base.split(/[\s._-]+/).filter(Boolean);
+  const sources = words.length > 1 ? [words[0], words.at(-1)] : [base];
+  const letters = [];
+  for (const word of sources) {
+    const first = Array.from(word).find(character => /[\p{L}\p{N}]/u.test(character));
+    if (first) letters.push(first);
+    if (letters.length === 2) break;
+  }
+  return letters.join('').toUpperCase() || '·';
+}
+
+export function projectTone(seed) {
+  let hash = 2166136261;
+  for (const character of String(seed ?? '')) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash) % PROJECT_TONES;
+}
+
+export function projectIcon(preferences, row, seed) {
+  const key = projectKeyFor(row);
+  const source = seed ?? projectSeedFor(row);
+  const entry = key ? preferences?.projectIcons?.[key] : undefined;
+  if (entry?.kind === 'none') return { kind: 'none' };
+  if (entry?.kind === 'icon' && PROJECT_ICONS.includes(entry.value)) return { kind: 'icon', value: entry.value, tone: projectTone(source) };
+  if (entry?.kind === 'text' && entry.value) return { kind: 'text', value: entry.value, tone: projectTone(source) };
+  return { kind: 'auto', value: projectInitials(source), tone: projectTone(source) };
+}
+
+// A Workspace without its own path borrows the directory most of its sessions live in.
+export function dominantProjectSeed(rows) {
+  const tally = new Map();
+  for (const row of rows) {
+    const seed = row?.cwd || row?.workspace?.path;
+    if (!seed) continue;
+    const entry = tally.get(seed) ?? { count: 0, latest: 0 };
+    entry.count += 1;
+    entry.latest = Math.max(entry.latest, row.activityStamp ?? row.updatedAt ?? 0);
+    tally.set(seed, entry);
+  }
+  let best = '';
+  let chosen = { count: 0, latest: -1 };
+  for (const [seed, entry] of tally) if (entry.count > chosen.count || entry.count === chosen.count && entry.latest > chosen.latest) { best = seed; chosen = entry; }
+  return best;
 }
 
 export function mainSessionId(list) {
@@ -42,7 +120,9 @@ export function deriveRows(list, workspaceSnapshot, statuses, preferences, now) 
     const childCount = children.reduce((n, child) => n + ((statuses.get(child.id)?.running ?? list.byId[child.id]?.running) === true ? 1 : 0), 0);
     const running = (status?.running ?? summary.running) === true;
     const waiting = ['approval', 'question', 'plan-review'].includes(pending);
-    const unread = status?.completionUnread === true;
+    // Host status wins; a locally observed completion covers hosts that report it late or not at all.
+    const localDone = preferences.done?.[id] !== undefined && preferences.done[id] >= (summary.updatedAt ?? 0);
+    const unread = status?.completionUnread === true || (!running && !waiting && localDone);
     // DSH catalog recency is the latest user prompt/steer, not run completion.
     const updatedAt = Number.isFinite(summary.updatedAt) ? summary.updatedAt : 0;
     const activityStamp = updatedAt;
@@ -119,6 +199,39 @@ export function recordReturns(preferences, previousRows, rows, now) {
     changed = true;
   }
   return changed ? { ...preferences, returnedAt } : preferences;
+}
+
+// A run that ends while the user is elsewhere stays "Done" until that session is opened.
+export function recordCompletions(preferences, previousRows, rows, currentId, now) {
+  if (!previousRows?.length || !Number.isFinite(now) || now < 0) return preferences;
+  const previousById = new Map(previousRows.map(row => [row.id, row]));
+  let done = preferences.done ?? {};
+  let changed = false;
+  const clear = id => {
+    if (done[id] === undefined) return false;
+    if (!changed) done = { ...done };
+    delete done[id];
+    changed = true;
+    return true;
+  };
+  for (const row of rows) {
+    if (row.id === currentId) { clear(row.id); continue; }
+    const previous = previousById.get(row.id);
+    if (!previous || row.archived || row.group === 'snoozed' || row.group === 'settled' || row.blank) continue;
+    const wasBusy = previous.running === true || previous.childCount > 0;
+    const busy = row.running === true || row.childCount > 0;
+    if (wasBusy && !busy && !row.waiting) {
+      if ((done[row.id] ?? -1) < now) {
+        if (!changed) done = { ...done };
+        done[row.id] = now;
+        changed = true;
+      }
+      continue;
+    }
+    // New activity outdates the completion reminder.
+    if (busy || (row.activityStamp ?? 0) > (done[row.id] ?? -1)) clear(row.id);
+  }
+  return changed ? { ...preferences, done } : preferences;
 }
 
 export function filterRows(rows, { query = '', workspace = '*', filter = 'all', contentIds = [] } = {}) {

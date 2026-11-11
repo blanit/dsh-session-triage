@@ -7,8 +7,6 @@ function createPlugin(React, model, dictionaries, css) {
   const glyphs = {
     inbox: ['M7 4.5h10a2 2 0 0 1 1.9 1.4l2 6.2a3 3 0 0 1 .1.9v4.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V13a3 3 0 0 1 .1-.9l2-6.2A2 2 0 0 1 7 4.5Z', 'M3.5 12h3.8a1.5 1.5 0 0 1 1.4 1l.3 1a1.5 1.5 0 0 0 1.4 1h3.2a1.5 1.5 0 0 0 1.4-1l.3-1a1.5 1.5 0 0 1 1.4-1h3.8'],
     search: ['M17.5 10.75a6.75 6.75 0 1 1-13.5 0 6.75 6.75 0 0 1 13.5 0Z', 'm15.75 15.75 4.5 4.5'],
-    // Native DSH new-chat outline, retaining its 16-unit grid and centered plus.
-    compose: ['M2.37091 11.2501C1.58745 9.89288 1.32067 8.29835 1.61969 6.76006C1.91872 5.22177 2.76342 3.8433 3.99826 2.87846C5.2331 1.91362 6.77494 1.42737 8.33988 1.50925C9.90482 1.59113 11.3875 2.23562 12.5149 3.32406C13.6425 4.41269 14.3387 5.87206 14.4754 7.4334C14.612 8.99474 14.18 10.5529 13.2587 11.8209C12.3375 13.0888 10.9891 13.9813 9.46194 14.3337C8.18691 14.628 6.85895 14.5294 5.64989 14.0605C5.1712 13.8748 4.76962 13.4932 4.26534 13.3967C3.67413 13.2835 2.95257 13.5598 2.03794 14.3337', 'M8 5V11', 'M5 8H11'],
     folder: ['M3 8V6.5a2 2 0 0 1 2-2h3.2a2 2 0 0 1 1.4.6l1.8 1.8a2 2 0 0 0 1.4.6H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z'],
     folderPlus: ['M3 8V6.5a2 2 0 0 1 2-2h3.2a2 2 0 0 1 1.4.6l1.8 1.8a2 2 0 0 0 1.4.6H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z', 'M12 10.5v6', 'M9 13.5h6'],
     close: ['m7 7 10 10', 'M17 7 7 17'],
@@ -23,13 +21,47 @@ function createPlugin(React, model, dictionaries, css) {
     undo: ['m7.5 5.5-3.1 3.1a1 1 0 0 0 0 1.4l3.1 3.1', 'M4.5 9.3H14a5.5 5.5 0 0 1 0 11h-2'],
     spinner: ['M12 3.5a8.5 8.5 0 1 1-8.5 8.5'],
     alert: ['M10.3 4.5a2 2 0 0 1 3.4 0l7 12.5a2 2 0 0 1-1.7 3H5a2 2 0 0 1-1.7-3l7-12.5Z', 'M12 9v4', 'M12 16.5h.01'],
+    code: ['m9 8-4.5 4 4.5 4', 'm15 8 4.5 4-4.5 4'],
+    terminal: ['M5.5 7.5 10 12l-4.5 4.5', 'M13 16.5h5.5'],
+    package: ['M12 3.5 20 8v8l-8 4.5L4 16V8Z', 'M4 8l8 4.5L20 8', 'M12 12.5v8'],
+    book: ['M6 4.5h8.5a3 3 0 0 1 3 3V20H8.5a2.5 2.5 0 0 1-2.5-2.5Z', 'M6 4.5V20'],
+    spark: ['M12 3.5 14 9.9l6.4 2.1L14 14.1 12 20.5 10 14.1 3.6 12 10 9.9Z'],
+    branch: ['M7 4.5v10', 'M7 8.5h6a4 4 0 0 1 4 4v2', 'M9 20a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z', 'M19 8.5a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z', 'M19 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z'],
+    layers: ['m12 3.5 8 4.5-8 4.5-8-4.5Z', 'm4 12 8 4.5 8-4.5', 'm4 16 8 4.5 8-4.5'],
   };
   function Icon({ name = 'inbox', size = 16 }) {
-    const nativeChat = name === 'compose';
-    return h('svg', { width: size, height: size, viewBox: nativeChat ? '0 0 16 16' : '0 0 24 24', fill: name === 'more' ? 'currentColor' : 'none', stroke: name === 'more' ? 'none' : 'currentColor', strokeWidth: nativeChat ? 1.3 : 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, focusable: false, className: name === 'spinner' ? 'dst-glyph dst-spinner' : 'dst-glyph' }, ...glyphs[name].map((d, i) => h('path', { key: i, d })));
+    return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: name === 'more' ? 'currentColor' : 'none', stroke: name === 'more' ? 'none' : 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, focusable: false, className: name === 'spinner' ? 'dst-glyph dst-spinner' : 'dst-glyph' }, ...(glyphs[name] ?? glyphs.inbox).map((d, i) => h('path', { key: i, d })));
   }
   function iconButton(name, label, onClick, extra = {}) {
     return h('button', { type: 'button', className: 'dst-icon', title: label, 'aria-label': label, onClick, ...extra }, h(Icon, { name, size: 16 }));
+  }
+  // Generated project marks: initials and a stable tone from the project path, unless overridden.
+  function ProjectIcon({ spec, size = 20, className = '' }) {
+    if (!spec) return null;
+    if (spec.kind === 'none') return null;
+    const content = spec.kind === 'icon'
+      ? h(Icon, { name: spec.value, size: Math.round(size * 0.7) })
+      : h('span', { className: spec.kind === 'text' ? 'dst-project-glyph dst-project-emoji' : 'dst-project-glyph' }, spec.value);
+    return h('span', { className: 'dst-project-icon ' + className, 'data-tone': spec.tone, 'aria-hidden': true }, content);
+  }
+  function IconPicker({ label, entry, t, onPick, close }) {
+    const [text, setText] = React.useState(entry?.kind === 'text' ? entry.value : '');
+    const apply = () => {
+      const value = Array.from(text.trim()).slice(0, 4).join('');
+      if (value) { onPick({ kind: 'text', value }); close(); }
+    };
+    return h(React.Fragment, null,
+      menuItem(t('iconAuto'), () => { onPick(null); close(); }, { role: 'menuitemradio', 'aria-checked': !entry }),
+      h('div', { className: 'dst-menu-separator', role: 'separator' }),
+      h('div', { className: 'dst-menu-heading', role: 'presentation' }, t('iconPresets')),
+      h('div', { className: 'dst-icon-grid', role: 'group', 'aria-label': t('iconPresets') },
+        ...model.PROJECT_ICONS.map(name => h('button', { key: name, type: 'button', role: 'menuitemradio', 'aria-checked': entry?.kind === 'icon' && entry.value === name, 'aria-label': t('icon_' + name), title: t('icon_' + name), className: 'dst-menu-item dst-icon-choice', onClick: () => { onPick({ kind: 'icon', value: name }); close(); } }, h(Icon, { name, size: 16 })))),
+      h('div', { className: 'dst-menu-separator', role: 'separator' }),
+      h('div', { className: 'dst-menu-heading', role: 'presentation' }, t('iconCustom')),
+      h('label', { className: 'dst-menu-field' }, h('span', { className: 'dst-sr-only' }, t('iconCustom')), h('input', { type: 'text', value: text, maxLength: 4, placeholder: t('iconCustomHint'), 'aria-label': t('iconCustom'), onChange: event => setText(event.target.value), onKeyDown: event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); apply(); } } })),
+      menuItem(t('iconApply'), apply, { disabled: !text.trim() }),
+      h('div', { className: 'dst-menu-separator', role: 'separator' }),
+      menuItem(t('iconNone'), () => { onPick({ kind: 'none' }); close(); }, { role: 'menuitemradio', 'aria-checked': entry?.kind === 'none' }));
   }
   function age(time, now, t) {
     const minutes = Math.floor(Math.max(0, now - time) / 60000);
@@ -45,7 +77,7 @@ function createPlugin(React, model, dictionaries, css) {
     return workspace?.title === 'default-workspace' ? t('defaultWorkspace') : workspace?.title || t('ungrouped');
   }
   function rowTitle(row, t) { return row.blank ? t('draft') : row.title || t('untitled'); }
-  function Popover({ label, icon, active, children, align = 'right', className = '', submenu = false, picker = false, value, description }) {
+  function Popover({ label, icon, active, children, align = 'right', className = '', submenu = false, picker = false, value, description, leading }) {
     const [open, setOpen] = React.useState(false);
     const root = React.useRef(null);
     const button = React.useRef(null);
@@ -107,7 +139,7 @@ function createPlugin(React, model, dictionaries, css) {
         if (items.length) { event.preventDefault(); event.stopPropagation(); const index = items.indexOf(document.activeElement); const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length; items[next].focus(); }
       }
     } },
-    submenu ? h('button', { type: 'button', className: 'dst-menu-item dst-submenu-trigger', role: 'menuitem', title: description, onClick: event => { if (event.detail === 0) focusEntry.current = 'first'; setOpen(current => !current); }, ...trigger }, h('span', { className: 'dst-menu-label' }, label), h('span', { className: 'dst-menu-value' }, value, h(Icon, { name: 'chevron', size: 12 }))) : picker ? h('button', { type: 'button', className: 'dst-select-trigger', 'aria-label': label, onClick: event => { if (event.detail === 0) focusEntry.current = 'first'; setOpen(current => !current); }, ...trigger }, value, h('span', { className: 'dst-picker-chevron' }, h(Icon, { name: 'chevron', size: 12 }))) : iconButton(icon, label, () => setOpen(current => !current), trigger),
+    submenu ? h('button', { type: 'button', className: 'dst-menu-item dst-submenu-trigger', role: 'menuitem', title: description, onClick: event => { if (event.detail === 0) focusEntry.current = 'first'; setOpen(current => !current); }, ...trigger }, leading ?? null, h('span', { className: 'dst-menu-label' }, label), h('span', { className: 'dst-menu-value' }, value, h(Icon, { name: 'chevron', size: 12 }))) : picker ? h('button', { type: 'button', className: 'dst-select-trigger', 'aria-label': label, onClick: event => { if (event.detail === 0) focusEntry.current = 'first'; setOpen(current => !current); }, ...trigger }, value, h('span', { className: 'dst-picker-chevron' }, h(Icon, { name: 'chevron', size: 12 }))) : iconButton(icon, label, () => setOpen(current => !current), trigger),
     open && h('div', { id: menuId, ref: menu, popover: 'manual', className: 'dst-menu', style: position, 'data-menu-material': 'translucent', 'data-submenu': submenu, role: 'menu', 'aria-label': label }, children(() => setOpen(false))));
   }
   function menuItem(text, onClick, extra = {}) {
@@ -123,7 +155,7 @@ function createPlugin(React, model, dictionaries, css) {
     const mode = usePrefs(p => p.mode);
     return h('div', { className: 'dst-setting' }, h('div', null, h('div', { className: 'dst-setting-title' }, t('modeLabel')), h('div', { className: 'dst-setting-description' }, t('modeDescription'))), h(Popover, { label: t('modeLabel'), picker: true, value: t(mode) }, close => h(React.Fragment, null, ...['classic', 'modern'].map(value => menuItem(t(value), () => { close(); setMode(value); }, { key: value, role: 'menuitemradio', 'aria-checked': mode === value })))));
   }
-  function SessionRow({ row, selected, compact, now, t, open, openMenu, useContextMenu, act, renameSession, fail, dragging, dropBefore, onDrag, onDragEnd, onDropRow, onDragOverRow }) {
+  function SessionRow({ row, selected, compact, now, t, icon, open, useContextMenu, act, renameSession, fail, dragging, dropBefore, onDrag, onDragEnd, onDropRow, onDragOverRow }) {
     const title = rowTitle(row, t);
     const { getTriggerProps } = useContextMenu();
     const [renaming, setRenaming] = React.useState(false);
@@ -155,8 +187,11 @@ function createPlugin(React, model, dictionaries, css) {
     };
     const snoozeFor = (close, until) => { close(); perform('snooze', until); };
     const nextMorning = () => { const date = new Date(); date.setDate(date.getDate() + 1); date.setHours(9, 0, 0, 0); return date.getTime(); };
-    const project = h('span', { className: 'dst-project' }, h('span', { className: 'dst-project-icon' }, h(Icon, { name: 'folder', size: 12 })), !compact && h('span', { className: 'dst-project-name' }, workspaceName(row.workspace, t)), row.pinned && h(Icon, { name: 'pin', size: 11 }));
-    const timing = h('span', { className: 'dst-row-timing', 'data-tone': row.waiting ? 'warning' : running ? 'running' : row.unread ? 'success' : undefined }, row.snoozedUntil ? h(React.Fragment, null, h(Icon, { name: 'clock', size: 12 }), h('time', { title: new Date(row.snoozedUntil).toLocaleString('en') }, wakeTime(row.snoozedUntil, now))) : status ? h(React.Fragment, null, h(Icon, { name: statusIcon, size: 12 }), t(status)) : h('time', { dateTime: new Date(row.updatedAt).toISOString(), title: new Date(row.updatedAt).toLocaleString('en') }, age(row.updatedAt, now, t)));
+    const project = h('span', { className: 'dst-project' }, h(ProjectIcon, { spec: icon }), !compact && h('span', { className: 'dst-project-name' }, workspaceName(row.workspace, t)), row.pinned && h(Icon, { name: 'pin', size: 11 }));
+    const tone = row.waiting ? 'warning' : running ? 'running' : row.unread ? 'success' : row.snoozedUntil ? 'snoozed' : undefined;
+    const timing = row.blank ? null : h('span', { key: tone ?? 'idle', className: 'dst-row-timing', 'data-tone': tone }, row.snoozedUntil ? h(React.Fragment, null, h(Icon, { name: 'clock', size: 12 }), h('time', { title: new Date(row.snoozedUntil).toLocaleString('en') }, wakeTime(row.snoozedUntil, now))) : status ? h(React.Fragment, null, h(Icon, { name: statusIcon, size: 12 }), t(status)) : h('time', { dateTime: new Date(row.updatedAt).toISOString(), title: new Date(row.updatedAt).toLocaleString('en') }, age(row.updatedAt, now, t)));
+    // A draft has nothing to describe: no action strip, no age, and no hover tooltip.
+    const tooltip = row.blank ? undefined : [title, row.cwd, t(row.state)].filter(Boolean).join('\n');
     const controls = !row.blank && h('div', { className: 'dst-row-controls' },
       !row.archived && (parked ? iconButton('undo', t(row.group === 'snoozed' ? 'wake' : 'unsettle'), () => perform('wake'), { disabled: busy }) : h(React.Fragment, null,
         h(Popover, { label: t('snooze'), icon: 'clock', className: 'dst-snooze-menu' }, close => h(React.Fragment, null,
@@ -164,14 +199,13 @@ function createPlugin(React, model, dictionaries, css) {
           h('div', { className: 'dst-menu-separator' }),
           h('label', { className: 'dst-custom-time' }, t('snoozeUntil'), h('input', { type: 'datetime-local', value: customTime, 'aria-label': t('snoozeUntil'), onChange: event => setCustomTime(event.target.value) })),
           menuItem(t('applySnooze'), () => { const until = new Date(customTime).getTime(); if (!Number.isFinite(until) || until <= Date.now()) { fail(new Error(t('invalidTime'))); return; } snoozeFor(close, until); }, { disabled: !customTime || row.waiting || busy }))),
-        h('button', { type: 'button', className: 'dst-settle', title: t('settleSession'), 'aria-label': t('settleSession'), disabled: row.waiting || busy, onClick: () => perform('settle') }, h(Icon, { name: 'check', size: 13 }), !compact && t('settle')))),
-      iconButton('more', t('more'), event => { const box = event.currentTarget.getBoundingClientRect(); openMenu(row, { x: box.left, y: box.bottom }); }, { 'data-context-menu-trigger': '', 'aria-haspopup': 'menu' }));
+        h('button', { type: 'button', className: 'dst-settle', title: t('settleSession'), 'aria-label': t('settleSession'), disabled: row.waiting || busy, onClick: () => perform('settle') }, h(Icon, { name: 'check', size: 13 }), !compact && t('settle')))));
     return h('article', { className: 'dst-row', 'data-session-id': row.id, 'data-selected': selected, 'data-compact': compact, 'data-dragging': dragging === row.id, 'data-drop-before': dropBefore === row.id, draggable: !row.blank && !renaming, ...triggers,
       onDragStart: event => { if (event.target.closest('input')) { event.preventDefault(); return; } event.dataTransfer.setData('text/plain', row.id); event.dataTransfer.effectAllowed = 'move'; onDrag(row.id); },
       onDragEnd, onDragOver: event => { if (dragging && dragging !== row.id) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; onDragOverRow(row.id); } },
       onDrop: event => { if (dragging) { event.preventDefault(); event.stopPropagation(); onDropRow(row); } },
     },
-      h('button', { type: 'button', className: 'dst-open', 'data-session-open': row.id, 'aria-current': selected ? 'page' : undefined, 'aria-label': `${title} · ${t(row.state)}`, title: [title, row.cwd, t(row.state)].filter(Boolean).join('\n'), onClick: () => open(row), onDoubleClick: startRename },
+      h('button', { type: 'button', className: 'dst-open', 'data-session-open': row.id, 'aria-current': selected ? 'page' : undefined, 'aria-label': row.blank ? title : `${title} · ${t(row.state)}`, title: tooltip, onClick: () => open(row), onDoubleClick: startRename },
         compact ? h('span', { className: 'dst-slim-content' }, project, h('span', { className: 'dst-title' }, title), timing) : h(React.Fragment, null,
           h('span', { className: 'dst-project-line' }, project, timing),
           h('span', { className: 'dst-title', 'data-renaming': renaming }, title),
@@ -180,7 +214,7 @@ function createPlugin(React, model, dictionaries, css) {
       controls);
   }
   function Browser(props) {
-    const { wide, expandSidebar, usePrefs, useSaveError, useSessions, useWorkspaces, useSessionStatus, usePanelInfo, useRemoteAccess, useContextMenu, setView, setMode, openSession, startSession, openMenu, searchSessions, renameSession, setPinned, addWorkspace, t } = props;
+    const { wide, expandSidebar, usePrefs, useSaveError, useSessions, useWorkspaces, useSessionStatus, usePanelInfo, useRemoteAccess, useContextMenu, setView, setMode, openSession, startSession, searchSessions, renameSession, setPinned, addWorkspace, t } = props;
     const preferences = usePrefs(identity);
     const saveError = useSaveError(identity);
     const list = useSessions(identity);
@@ -205,6 +239,33 @@ function createPlugin(React, model, dictionaries, css) {
     const visible = React.useMemo(() => model.filterRows(rows, { query, workspace: project, filter: archived ? 'archived' : 'all', contentIds: remote.query === q ? remote.items.map(item => item.sessionId) : [] }), [rows, query, project, archived, remote, q]);
     const latest = React.useRef(null);
     latest.current = { current, panelActive, visible, rows };
+    // FLIP: rows that survive a state change glide from their previous slot instead of snapping.
+    const layoutRects = React.useRef(new Map());
+    React.useLayoutEffect(() => {
+      const root = rootRef.current;
+      if (!root) return;
+      const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const moveDuration = reduced ? 120 : 200;
+      const fadeDuration = reduced ? 120 : 180;
+      const next = new Map();
+      const play = (node, frames, options) => {
+        for (const running of node.getAnimations()) running.cancel();
+        node.animate(frames, options);
+      };
+      for (const node of root.querySelectorAll('[data-session-id]')) {
+        const id = node.getAttribute('data-session-id');
+        const rect = node.getBoundingClientRect();
+        next.set(id, rect);
+        if (typeof node.animate !== 'function') continue;
+        const holder = node.closest('.dst-shelf-body');
+        // Collapsed or folding shelves own their own motion; the grid track handles it.
+        if (holder && holder.dataset.expanded !== 'true') continue;
+        const previous = layoutRects.current.get(id);
+        if (!previous) play(node, [{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'none' }], { duration: fadeDuration, easing: 'ease' });
+        else if (Math.abs(previous.top - rect.top) >= 1) play(node, [{ transform: `translateY(${previous.top - rect.top}px)` }, { transform: 'none' }], { duration: moveDuration, easing: 'cubic-bezier(.22,.68,.3,1)' });
+      }
+      layoutRects.current = next;
+    }, [rows]);
     const fail = error => setNote({ text: `${t('failed')}: ${error?.message || String(error)}`, error: true });
     React.useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 15000); return () => clearInterval(timer); }, []);
     React.useEffect(() => { if (!note || note.error) return; const timer = setTimeout(() => setNote(null), 7000); return () => clearTimeout(timer); }, [note]);
@@ -221,18 +282,18 @@ function createPlugin(React, model, dictionaries, css) {
     React.useEffect(() => {
       const previous = previousRows.current;
       previousRows.current = rows;
-      if (previous) setView(p => model.recordReturns(p, previous, rows, Date.now()));
-    }, [rows, setView]);
+      if (previous) setView(p => model.recordCompletions(model.recordReturns(p, previous, rows, Date.now()), previous, rows, current, Date.now()));
+    }, [rows, setView, current]);
     React.useEffect(() => {
       const waking = rows.filter(row => row.pendingWake);
       if (waking.length) setView(p => waking.reduce((next, row) => model.wake(next, row), p));
     }, [rows, setView]);
     const open = row => {
       if (row.archived) { setNote({ text: t('restoreFirst'), error: true }); return; }
+      if (preferences.done?.[row.id] !== undefined) setView(p => { const done = { ...(p.done ?? {}) }; delete done[row.id]; return { ...p, done }; });
       openSession(row.id);
     };
     const act = async (kind, row, value) => {
-      const before = preferences;
       const wasPinned = row.pinned;
       try {
         if (['settle', 'snooze'].includes(kind) && row.waiting) return;
@@ -241,22 +302,6 @@ function createPlugin(React, model, dictionaries, css) {
         else if (kind === 'settle') setView(p => model.settle(p, row, Date.now()));
         else if (kind === 'snooze') setView(p => model.snooze(p, row, value));
         else setView(p => ({ ...model.wake(p, row), returnedAt: { ...p.returnedAt, [row.id]: Date.now() } }));
-        setNote({ text: t(kind === 'settle' ? 'settledNotice' : kind === 'snooze' ? 'snoozedNotice' : kind === 'pin' ? 'pinNotice' : 'wakeNotice'), undo: async () => {
-          try {
-            if (kind === 'pin' && !wasPinned) await setPinned(row.id, false);
-            if (wasPinned && ['settle', 'snooze', 'active'].includes(kind)) await setPinned(row.id, true);
-            setView(p => {
-              const restored = { ...p };
-              for (const key of ['settled', 'settledAt', 'snoozed', 'awakened', 'returnedAt']) {
-                restored[key] = { ...(p[key] || {}) };
-                if (before[key]?.[row.id] === undefined) delete restored[key][row.id]; else restored[key][row.id] = before[key][row.id];
-              }
-              return restored;
-            });
-            if (row.id === current) openSession(row.id);
-            setNote(null);
-          } catch (error) { fail(error); }
-        } });
         if (['settle', 'snooze'].includes(kind) && row.id === latest.current.current && !latest.current.panelActive) {
           const next = model.nextSession(latest.current.visible, row.id);
           if (next) openSession(next); else if (canCreate) startSession(project && project !== '*' ? project : undefined);
@@ -278,20 +323,53 @@ function createPlugin(React, model, dictionaries, css) {
       if (group === 'settled') await act('settle', row);
       if (group === 'snoozed') await act('snooze', row, Date.now() + 3600000);
     };
-    const rowElement = (row, compact = false) => h(SessionRow, { key: row.id, row, compact, selected: !panelActive && row.id === current, now, t, open, openMenu, useContextMenu, act, renameSession, fail, dragging, dropBefore, onDrag: setDragging, onDragEnd: clearDrag, onDragOverRow: setDropBefore, onDropRow: destination => dropInto(destination.group, destination.id) });
+    const projectSeeds = React.useMemo(() => {
+      const grouped = new Map();
+      for (const row of rows) {
+        const key = model.projectKeyFor(row);
+        if (key) grouped.set(key, [...(grouped.get(key) ?? []), row]);
+      }
+      const map = new Map();
+      for (const workspace of workspaces.items) if (workspace.path) map.set(`workspace:${workspace.workspaceId}`, workspace.path);
+      for (const [key, members] of grouped) if (!map.has(key)) { const seed = model.dominantProjectSeed(members); if (seed) map.set(key, seed); }
+      return map;
+    }, [rows, workspaces.items]);
+    const projectEntries = React.useMemo(() => {
+      const items = workspaces.items.map(workspace => ({ key: `workspace:${workspace.workspaceId}`, label: workspaceName(workspace, t), seedRow: { workspace, projectSeed: projectSeeds.get(`workspace:${workspace.workspaceId}`) } }));
+      const seen = new Set(items.map(item => item.key));
+      for (const row of rows) {
+        const key = model.projectKeyFor(row);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        items.push({ key, label: String(row.cwd ?? '').replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).at(-1) || t('ungrouped'), seedRow: { cwd: row.cwd, projectSeed: projectSeeds.get(key) } });
+      }
+      return items;
+    }, [rows, workspaces.items, projectSeeds, t]);
+    const setProjectIcon = (key, entry) => setView(p => {
+      const next = { ...(p.projectIcons ?? {}) };
+      if (entry) next[key] = entry; else delete next[key];
+      return { ...p, projectIcons: next };
+    });
+    const rowElement = (row, compact = false) => h(SessionRow, { key: row.id, row, compact, icon: model.projectIcon(preferences, row, projectSeeds.get(model.projectKeyFor(row))), selected: !panelActive && row.id === current, now, t, open, useContextMenu, act, renameSession, fail, dragging, dropBefore, onDrag: setDragging, onDragEnd: clearDrag, onDragOverRow: setDropBefore, onDropRow: destination => dropInto(destination.group, destination.id) });
     const groupZone = (key, children) => h('section', { key, className: 'dst-top-group', 'data-drop-group': key, 'aria-label': t(key), onDragOver: event => { if (dragging) event.preventDefault(); }, onDrop: event => { if (dragging) { event.preventDefault(); dropInto(key); } } }, h('h3', { className: dragging ? 'dst-drag-label' : 'dst-sr-only' }, t(key)), children);
     const shelf = key => {
       const members = visible.filter(row => row.group === key);
       if (!members.length && !((key === 'settled' && visible.length > 0 && !archived) || (dragging && ['snoozed', 'settled'].includes(key)))) return null;
-      const expanded = preferences.collapsed[key] === false;
-      const shown = model.shelfRows(visible, key, panelActive ? null : current, expanded);
+      const expanded = key === 'working' ? preferences.collapsed[key] !== true : preferences.collapsed[key] === false;
+      const shown = model.shelfRows(visible, key, panelActive ? null : current, true);
       return h('section', { key, className: 'dst-shelf', 'aria-label': t(key), onDragOver: event => { if (dragging && key !== 'working') event.preventDefault(); }, onDrop: event => { if (dragging && key !== 'working') { event.preventDefault(); dropInto(key); } } },
         h('button', { type: 'button', className: 'dst-shelf-heading', 'aria-expanded': expanded, onClick: () => setView(p => ({ ...p, collapsed: { ...p.collapsed, [key]: expanded } })) }, h('span', null, t(key)), h('span', { className: 'dst-shelf-count' }, members.length), h('span', { className: 'dst-shelf-chevron', 'data-expanded': expanded }, h(Icon, { name: 'chevron', size: 12 }))),
-        ...shown.map(row => rowElement(row, key !== 'working')));
+        h('div', { className: 'dst-shelf-body', 'data-expanded': expanded, 'aria-hidden': expanded ? undefined : 'true', inert: expanded ? undefined : '' },
+          h('div', { className: 'dst-shelf-inner' }, ...shown.map(row => rowElement(row, key !== 'working')))));
     };
     const currentSearch = visible[Math.min(searchIndex, Math.max(0, visible.length - 1))];
     const projectScope = h(Popover, { label: t('projects'), icon: 'filter', active: project !== '*', align: 'right' }, close => h(React.Fragment, null,
-      ...[{ workspaceId: '*', title: t('allProjects') }, ...workspaces.items, { workspaceId: '', title: t('ungrouped') }].map(workspace => menuItem(workspaceName(workspace, t), () => { setProject(workspace.workspaceId); close(); }, { key: workspace.workspaceId, role: 'menuitemradio', 'aria-checked': project === workspace.workspaceId }))));
+      ...[{ workspaceId: '*', title: t('allProjects') }, ...workspaces.items, { workspaceId: '', title: t('ungrouped') }].map(workspace => {
+        const id = workspace.workspaceId;
+        const spec = id === '*' ? null : id === '' ? model.projectIcon(preferences, { cwd: rows.find(row => !row.workspace)?.cwd }) : model.projectIcon(preferences, { workspace, projectSeed: projectSeeds.get(`workspace:${id}`) });
+        const label = id === '*' ? t('allProjects') : workspaceName(workspace, t);
+        return menuItem(spec ? h(React.Fragment, null, h(ProjectIcon, { spec }), h('span', null, label)) : label, () => { setProject(id); close(); }, { key: id, role: 'menuitemradio', 'aria-checked': project === id });
+      })));
     if (!wide) return h('div', { className: 'dst-root dst-rail' }, iconButton('inbox', t('expand'), expandSidebar));
     return h('section', { ref: rootRef, className: 'dst-root', 'aria-label': t('sessions'), 'data-session-triage': 'modern', lang: 'en', onKeyDown: event => {
       if (!['ArrowUp', 'ArrowDown'].includes(event.key) || event.target.closest('input,select,[role="menu"]')) return;
@@ -307,7 +385,6 @@ function createPlugin(React, model, dictionaries, css) {
         } }), q && iconButton('close', t('clear'), () => { setQuery(''); searchRef.current?.focus(); })),
         projectScope,
         iconButton('folderPlus', t('addWorkspace'), async () => { try { const workspace = await addWorkspace(); if (workspace) { setProject(workspace.workspaceId); startSession(workspace.workspaceId); } } catch (error) { fail(error); } }),
-        canCreate && iconButton('compose', t('new'), () => startSession(project && project !== '*' ? project : undefined)),
         h(Popover, { label: t('options'), icon: 'more' }, close => h(React.Fragment, null,
           menuItem(t('workingSection'), () => setView(p => ({ ...p, workingSection: !p.workingSection })), { role: 'menuitemcheckbox', 'aria-checked': preferences.workingSection }),
           menuItem(t('showArchived'), () => { setArchived(value => !value); close(); }, { role: 'menuitemcheckbox', 'aria-checked': archived }),
@@ -317,8 +394,11 @@ function createPlugin(React, model, dictionaries, css) {
           h('div', { className: 'dst-menu-separator', role: 'separator' }),
           h(Popover, { label: t('autoSettle'), submenu: true, description: t('localHint'), value: t(({ 0: 'never', 6: 'sixHours', 24: 'oneDay', 72: 'threeDays', 168: 'oneWeek' })[preferences.autoSettleHours]) }, closeSubmenu => h(React.Fragment, null,
             ...[[0, 'never'], [6, 'sixHours'], [24, 'oneDay'], [72, 'threeDays'], [168, 'oneWeek']].map(([value, key]) => menuItem(t(key), () => { setView(p => ({ ...p, autoSettleHours: value })); closeSubmenu(); close(); }, { key, role: 'menuitemradio', 'aria-checked': preferences.autoSettleHours === value })))),
+          h('div', { className: 'dst-menu-separator', role: 'separator' }),
+          h(Popover, { label: t('icons'), submenu: true }, closeIcons => h(React.Fragment, null,
+            ...(projectEntries.length ? projectEntries.map(entry => h(Popover, { key: entry.key, label: entry.label, submenu: true, leading: h(ProjectIcon, { spec: model.projectIcon(preferences, entry.seedRow) }) }, closePicker => h(IconPicker, { label: entry.label, entry: preferences.projectIcons?.[entry.key], t, onPick: value => setProjectIcon(entry.key, value), close: () => { closePicker(); closeIcons(); close(); } }))) : [h('div', { key: 'empty', className: 'dst-menu-heading', role: 'presentation' }, t('empty'))]))),
           h('div', { className: 'dst-menu-separator', role: 'separator' }), menuItem(t('switchClassic'), () => { close(); setMode('classic'); })))),
-      (project !== '*' || archived) && h('div', { className: 'dst-scope-line' }, h('span', null, archived ? t('archived') : workspaceName(workspaces.items.find(item => item.workspaceId === project), t)), iconButton('close', t('clear'), () => { setProject('*'); setArchived(false); })),
+      (project !== '*' || archived) && h('div', { className: 'dst-scope-line' }, h('span', null, !archived && h(ProjectIcon, { spec: project === '' ? model.projectIcon(preferences, { cwd: rows.find(row => !row.workspace)?.cwd }) : model.projectIcon(preferences, { workspace: workspaces.items.find(item => item.workspaceId === project), projectSeed: projectSeeds.get(`workspace:${project}`) }) }), archived ? t('archived') : workspaceName(workspaces.items.find(item => item.workspaceId === project), t)), iconButton('close', t('clear'), () => { setProject('*'); setArchived(false); })),
       saveError && h('div', { role: 'status', className: 'dst-notice dst-error' }, t('storageError')),
       note && h('div', { role: note.error ? 'alert' : 'status', className: 'dst-notice', 'data-error': note.error }, h('span', null, note.text), note.undo && h('button', { type: 'button', onClick: note.undo }, t('undo')), iconButton('close', t('close'), () => setNote(null))),
       q && remote.phase === 'loading' && h('div', { className: 'dst-search-note', role: 'status' }, t('searching')),
@@ -327,19 +407,18 @@ function createPlugin(React, model, dictionaries, css) {
         q ? h('section', { 'aria-label': t('results'), className: 'dst-search-results' }, ...visible.map((row, index) => h('div', { key: row.id, 'data-search-selected': index === searchIndex }, rowElement(row, true))), !visible.length && h('p', { className: 'dst-empty' }, t(list.phase !== 'ready' ? 'loading' : 'noMatch')), remote.hasMore && h('p', { className: 'dst-search-note' }, t('limited', { n: remote.items.length }))) : h(React.Fragment, null,
           (visible.some(row => row.group === 'pinned') || dragging) && groupZone('pinned', visible.filter(row => row.group === 'pinned').map(row => rowElement(row))),
           groupZone('active', visible.filter(row => row.group === 'active').map(row => rowElement(row))),
-          visible.length === 0 && h('div', { className: 'dst-empty' }, t(list.phase !== 'ready' ? 'loading' : 'empty'), canCreate && h('button', { type: 'button', className: 'dst-empty-action', onClick: () => startSession(project && project !== '*' ? project : undefined) }, t('new'))),
+          visible.length === 0 && h('div', { className: 'dst-empty' }, t(list.phase !== 'ready' ? 'loading' : 'empty')),
           h('div', { className: 'dst-shelves' }, ...['working', 'snoozed', 'settled', 'archived'].map(shelf))))
     );
   }
   return {
-    inject: ['slots', 'locale', 'uiWorkspace', 'sessions', 'contextMenus', 'workspaces'],
+    inject: ['slots', 'locale', 'uiWorkspace', 'sessions', 'workspaces'],
     apply(ctx) {
       try {
         const slots = ctx.get('slots');
         const locale = ctx.get('locale');
         const navigation = ctx.get('uiWorkspace');
         const sessions = ctx.get('sessions');
-        const menus = ctx.get('contextMenus');
         const workspaceStore = ctx.get('workspaces');
         ctx.effect(() => slots.onEntryError((slot, entry, error) => {
           if ([Browser, ModeButton, Setting].includes(entry.component)) console.error('[session-triage] render failed in ' + slot, error instanceof Error ? error.stack : String(error));
@@ -384,7 +463,6 @@ function createPlugin(React, model, dictionaries, css) {
               inject: () => ({ ...injected(),
                 openSession: id => navigation.openSession(id),
                 startSession: workspace => navigation.startSession(workspace),
-                openMenu: (row, point) => menus.open({ kind: 'session', value: { sessionId: row.id, displayTitle: row.title } }, point),
                 setPinned: (id, value) => value ? workspaceStore.pinSession(id) : workspaceStore.unpinSession(id),
                 addWorkspace: async () => { const path = await navigation.pickDirectory(); return path ? workspaceStore.create({ path }) : null; },
                 renameSession: (id, title) => sessions.using(id, { source: 'controllerOperation' }, async reference => { await reference.ready; const result = await reference.binding.session.rename(title); if (!result.ok) throw new Error(result.error.message); }),

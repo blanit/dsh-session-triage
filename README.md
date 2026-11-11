@@ -4,10 +4,11 @@ An English-first session sidebar inspired by the current T3 Code sidebar. Versio
 
 ## Layout and interactions
 
-- One compact Search toolbar with workspace scope, add-workspace, new-session, and options actions.
+- One compact Search toolbar with workspace scope, add-workspace, and options actions. The native New session button above the sidebar owns session creation; the plugin does not duplicate it.
 - Pinned sessions above the Active list, without permanent section headings or boxed cards.
 - Project and status on the first line; session title below. Actual subagent information appears when available. Unavailable Git branches and provider identities are omitted.
 - Hover or keyboard focus replaces a row's status with Snooze, Settle, and the native session menu, without adding another row of controls.
+- Project icons are generated: initials plus a stable tone derived from the project's path, or from the directory most of its sessions live in when the workspace has no path. Options → Project icons customizes any project with a preset icon, a custom character or emoji, or no icon; the automatic mark can be restored at any time.
 - Working, Snoozed, and Settled shelves sit at the bottom of the same scrolling list. Shelves start collapsed. Working uses full rows; Snoozed and Settled use compact rows.
 - A collapsed shelf still shows its currently open session. Opening it does not wake or un-settle it.
 - Settling or snoozing the current session advances to another Pinned/Active session in the current filter, or opens a new session when none remains.

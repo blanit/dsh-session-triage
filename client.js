@@ -4,8 +4,10 @@ window.__ModuleLoader__.load({
  factory(require) {
  const React = require('react');
  const model = (() => {
-const DEFAULTS = { mode: 'modern', workingSection: true, sort: 'newest', activeOrder: [], autoSettleHours: 24, returnedAt: {}, settled: {}, settledAt: {}, snoozed: {}, awakened: {}, collapsed: {} };
+const DEFAULTS = { mode: 'modern', workingSection: true, sort: 'newest', activeOrder: [], autoSettleHours: 24, returnedAt: {}, done: {}, settled: {}, settledAt: {}, snoozed: {}, awakened: {}, collapsed: {}, projectIcons: {} };
 const GROUPS = ['pinned', 'active', 'working', 'snoozed', 'settled', 'archived'];
+const PROJECT_ICONS = ['folder', 'code', 'terminal', 'package', 'book', 'spark', 'branch', 'layers'];
+const PROJECT_TONES = 6;
 
 function normalizePreferences(input) {
   const value = input && typeof input === 'object' ? input : {};
@@ -17,9 +19,85 @@ function normalizePreferences(input) {
     sort: value.sort === 'oldest' ? 'oldest' : 'newest',
     activeOrder: [...new Set((Array.isArray(value.activeOrder) ? value.activeOrder : []).filter(id => typeof id === 'string' && id.length > 0))],
     autoSettleHours: [0, 6, 24, 72, 168].includes(value.autoSettleHours) ? value.autoSettleHours : 24,
-    returnedAt: numbers(value.returnedAt), settled: numbers(value.settled), settledAt: numbers(value.settledAt), snoozed, awakened: numbers(value.awakened),
+    returnedAt: numbers(value.returnedAt), done: numbers(value.done), settled: numbers(value.settled), settledAt: numbers(value.settledAt), snoozed, awakened: numbers(value.awakened),
     collapsed: Object.fromEntries(Object.entries(value.collapsed ?? {}).filter(([key, flag]) => GROUPS.includes(key) && typeof flag === 'boolean')),
+    projectIcons: normalizeProjectIcons(value.projectIcons),
   };
+}
+
+// Per-project icon overrides stay presentation-only: an absent entry means the generated icon.
+function normalizeProjectIcons(input) {
+  const entries = Object.entries(input && typeof input === 'object' ? input : {}).slice(0, 200).flatMap(([key, entry]) => {
+    if (!key || !entry || typeof entry !== 'object') return [];
+    if (entry.kind === 'none') return [[key, { kind: 'none' }]];
+    if (entry.kind === 'icon' && PROJECT_ICONS.includes(entry.value)) return [[key, { kind: 'icon', value: entry.value }]];
+    const text = typeof entry.value === 'string' ? Array.from(entry.value.trim()).slice(0, 4).join('') : '';
+    return entry.kind === 'text' && text ? [[key, { kind: 'text', value: text }]] : [];
+  });
+  return Object.fromEntries(entries);
+}
+
+const pathBase = value => String(value ?? '').replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).at(-1) ?? '';
+
+function projectKeyFor(row) {
+  const id = row?.workspace?.workspaceId;
+  if (id) return `workspace:${id}`;
+  return row?.cwd ? `cwd:${row.cwd}` : '';
+}
+
+// The generated icon follows the project's own path, never its transient session order.
+// Workspace snapshots may omit `path`; the owning session cwd is the next best project fact.
+function projectSeedFor(row) {
+  return row?.workspace?.path || row?.projectSeed || row?.cwd || row?.workspace?.title || '';
+}
+
+function projectInitials(seed) {
+  const base = pathBase(seed);
+  const words = base.split(/[\s._-]+/).filter(Boolean);
+  const sources = words.length > 1 ? [words[0], words.at(-1)] : [base];
+  const letters = [];
+  for (const word of sources) {
+    const first = Array.from(word).find(character => /[\p{L}\p{N}]/u.test(character));
+    if (first) letters.push(first);
+    if (letters.length === 2) break;
+  }
+  return letters.join('').toUpperCase() || '·';
+}
+
+function projectTone(seed) {
+  let hash = 2166136261;
+  for (const character of String(seed ?? '')) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash) % PROJECT_TONES;
+}
+
+function projectIcon(preferences, row, seed) {
+  const key = projectKeyFor(row);
+  const source = seed ?? projectSeedFor(row);
+  const entry = key ? preferences?.projectIcons?.[key] : undefined;
+  if (entry?.kind === 'none') return { kind: 'none' };
+  if (entry?.kind === 'icon' && PROJECT_ICONS.includes(entry.value)) return { kind: 'icon', value: entry.value, tone: projectTone(source) };
+  if (entry?.kind === 'text' && entry.value) return { kind: 'text', value: entry.value, tone: projectTone(source) };
+  return { kind: 'auto', value: projectInitials(source), tone: projectTone(source) };
+}
+
+// A Workspace without its own path borrows the directory most of its sessions live in.
+function dominantProjectSeed(rows) {
+  const tally = new Map();
+  for (const row of rows) {
+    const seed = row?.cwd || row?.workspace?.path;
+    if (!seed) continue;
+    const entry = tally.get(seed) ?? { count: 0, latest: 0 };
+    entry.count += 1;
+    entry.latest = Math.max(entry.latest, row.activityStamp ?? row.updatedAt ?? 0);
+    tally.set(seed, entry);
+  }
+  let best = '';
+  let chosen = { count: 0, latest: -1 };
+  for (const [seed, entry] of tally) if (entry.count > chosen.count || entry.count === chosen.count && entry.latest > chosen.latest) { best = seed; chosen = entry; }
+  return best;
 }
 
 function mainSessionId(list) {
@@ -48,7 +126,9 @@ function deriveRows(list, workspaceSnapshot, statuses, preferences, now) {
     const childCount = children.reduce((n, child) => n + ((statuses.get(child.id)?.running ?? list.byId[child.id]?.running) === true ? 1 : 0), 0);
     const running = (status?.running ?? summary.running) === true;
     const waiting = ['approval', 'question', 'plan-review'].includes(pending);
-    const unread = status?.completionUnread === true;
+    // Host status wins; a locally observed completion covers hosts that report it late or not at all.
+    const localDone = preferences.done?.[id] !== undefined && preferences.done[id] >= (summary.updatedAt ?? 0);
+    const unread = status?.completionUnread === true || (!running && !waiting && localDone);
     // DSH catalog recency is the latest user prompt/steer, not run completion.
     const updatedAt = Number.isFinite(summary.updatedAt) ? summary.updatedAt : 0;
     const activityStamp = updatedAt;
@@ -127,6 +207,39 @@ function recordReturns(preferences, previousRows, rows, now) {
   return changed ? { ...preferences, returnedAt } : preferences;
 }
 
+// A run that ends while the user is elsewhere stays "Done" until that session is opened.
+function recordCompletions(preferences, previousRows, rows, currentId, now) {
+  if (!previousRows?.length || !Number.isFinite(now) || now < 0) return preferences;
+  const previousById = new Map(previousRows.map(row => [row.id, row]));
+  let done = preferences.done ?? {};
+  let changed = false;
+  const clear = id => {
+    if (done[id] === undefined) return false;
+    if (!changed) done = { ...done };
+    delete done[id];
+    changed = true;
+    return true;
+  };
+  for (const row of rows) {
+    if (row.id === currentId) { clear(row.id); continue; }
+    const previous = previousById.get(row.id);
+    if (!previous || row.archived || row.group === 'snoozed' || row.group === 'settled' || row.blank) continue;
+    const wasBusy = previous.running === true || previous.childCount > 0;
+    const busy = row.running === true || row.childCount > 0;
+    if (wasBusy && !busy && !row.waiting) {
+      if ((done[row.id] ?? -1) < now) {
+        if (!changed) done = { ...done };
+        done[row.id] = now;
+        changed = true;
+      }
+      continue;
+    }
+    // New activity outdates the completion reminder.
+    if (busy || (row.activityStamp ?? 0) > (done[row.id] ?? -1)) clear(row.id);
+  }
+  return changed ? { ...preferences, done } : preferences;
+}
+
 function filterRows(rows, { query = '', workspace = '*', filter = 'all', contentIds = [] } = {}) {
   const q = query.trim().toLocaleLowerCase();
   const hits = new Set(contentIds);
@@ -184,7 +297,7 @@ function reorder(preferences, rows, sessionId, beforeId) {
   return { ...preferences, activeOrder };
 }
 
-return { DEFAULTS, GROUPS, normalizePreferences, mainSessionId, deriveRows, recordReturns, filterRows, settle, wake, snooze, shelfRows, nextSession, reorder };
+return { DEFAULTS, GROUPS, PROJECT_ICONS, PROJECT_TONES, normalizePreferences, projectKeyFor, projectSeedFor, projectInitials, projectTone, projectIcon, dominantProjectSeed, mainSessionId, deriveRows, recordReturns, recordCompletions, filterRows, settle, wake, snooze, shelfRows, nextSession, reorder };
 })();
 function createPlugin(React, model, dictionaries, css) {
   const h = React.createElement;
@@ -195,8 +308,6 @@ function createPlugin(React, model, dictionaries, css) {
   const glyphs = {
     inbox: ['M7 4.5h10a2 2 0 0 1 1.9 1.4l2 6.2a3 3 0 0 1 .1.9v4.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V13a3 3 0 0 1 .1-.9l2-6.2A2 2 0 0 1 7 4.5Z', 'M3.5 12h3.8a1.5 1.5 0 0 1 1.4 1l.3 1a1.5 1.5 0 0 0 1.4 1h3.2a1.5 1.5 0 0 0 1.4-1l.3-1a1.5 1.5 0 0 1 1.4-1h3.8'],
     search: ['M17.5 10.75a6.75 6.75 0 1 1-13.5 0 6.75 6.75 0 0 1 13.5 0Z', 'm15.75 15.75 4.5 4.5'],
-    // Native DSH new-chat outline, retaining its 16-unit grid and centered plus.
-    compose: ['M2.37091 11.2501C1.58745 9.89288 1.32067 8.29835 1.61969 6.76006C1.91872 5.22177 2.76342 3.8433 3.99826 2.87846C5.2331 1.91362 6.77494 1.42737 8.33988 1.50925C9.90482 1.59113 11.3875 2.23562 12.5149 3.32406C13.6425 4.41269 14.3387 5.87206 14.4754 7.4334C14.612 8.99474 14.18 10.5529 13.2587 11.8209C12.3375 13.0888 10.9891 13.9813 9.46194 14.3337C8.18691 14.628 6.85895 14.5294 5.64989 14.0605C5.1712 13.8748 4.76962 13.4932 4.26534 13.3967C3.67413 13.2835 2.95257 13.5598 2.03794 14.3337', 'M8 5V11', 'M5 8H11'],
     folder: ['M3 8V6.5a2 2 0 0 1 2-2h3.2a2 2 0 0 1 1.4.6l1.8 1.8a2 2 0 0 0 1.4.6H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z'],
     folderPlus: ['M3 8V6.5a2 2 0 0 1 2-2h3.2a2 2 0 0 1 1.4.6l1.8 1.8a2 2 0 0 0 1.4.6H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z', 'M12 10.5v6', 'M9 13.5h6'],
     close: ['m7 7 10 10', 'M17 7 7 17'],
@@ -211,13 +322,47 @@ function createPlugin(React, model, dictionaries, css) {
     undo: ['m7.5 5.5-3.1 3.1a1 1 0 0 0 0 1.4l3.1 3.1', 'M4.5 9.3H14a5.5 5.5 0 0 1 0 11h-2'],
     spinner: ['M12 3.5a8.5 8.5 0 1 1-8.5 8.5'],
     alert: ['M10.3 4.5a2 2 0 0 1 3.4 0l7 12.5a2 2 0 0 1-1.7 3H5a2 2 0 0 1-1.7-3l7-12.5Z', 'M12 9v4', 'M12 16.5h.01'],
+    code: ['m9 8-4.5 4 4.5 4', 'm15 8 4.5 4-4.5 4'],
+    terminal: ['M5.5 7.5 10 12l-4.5 4.5', 'M13 16.5h5.5'],
+    package: ['M12 3.5 20 8v8l-8 4.5L4 16V8Z', 'M4 8l8 4.5L20 8', 'M12 12.5v8'],
+    book: ['M6 4.5h8.5a3 3 0 0 1 3 3V20H8.5a2.5 2.5 0 0 1-2.5-2.5Z', 'M6 4.5V20'],
+    spark: ['M12 3.5 14 9.9l6.4 2.1L14 14.1 12 20.5 10 14.1 3.6 12 10 9.9Z'],
+    branch: ['M7 4.5v10', 'M7 8.5h6a4 4 0 0 1 4 4v2', 'M9 20a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z', 'M19 8.5a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z', 'M19 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z'],
+    layers: ['m12 3.5 8 4.5-8 4.5-8-4.5Z', 'm4 12 8 4.5 8-4.5', 'm4 16 8 4.5 8-4.5'],
   };
   function Icon({ name = 'inbox', size = 16 }) {
-    const nativeChat = name === 'compose';
-    return h('svg', { width: size, height: size, viewBox: nativeChat ? '0 0 16 16' : '0 0 24 24', fill: name === 'more' ? 'currentColor' : 'none', stroke: name === 'more' ? 'none' : 'currentColor', strokeWidth: nativeChat ? 1.3 : 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, focusable: false, className: name === 'spinner' ? 'dst-glyph dst-spinner' : 'dst-glyph' }, ...glyphs[name].map((d, i) => h('path', { key: i, d })));
+    return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: name === 'more' ? 'currentColor' : 'none', stroke: name === 'more' ? 'none' : 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, focusable: false, className: name === 'spinner' ? 'dst-glyph dst-spinner' : 'dst-glyph' }, ...(glyphs[name] ?? glyphs.inbox).map((d, i) => h('path', { key: i, d })));
   }
   function iconButton(name, label, onClick, extra = {}) {
     return h('button', { type: 'button', className: 'dst-icon', title: label, 'aria-label': label, onClick, ...extra }, h(Icon, { name, size: 16 }));
+  }
+  // Generated project marks: initials and a stable tone from the project path, unless overridden.
+  function ProjectIcon({ spec, size = 20, className = '' }) {
+    if (!spec) return null;
+    if (spec.kind === 'none') return null;
+    const content = spec.kind === 'icon'
+      ? h(Icon, { name: spec.value, size: Math.round(size * 0.7) })
+      : h('span', { className: spec.kind === 'text' ? 'dst-project-glyph dst-project-emoji' : 'dst-project-glyph' }, spec.value);
+    return h('span', { className: 'dst-project-icon ' + className, 'data-tone': spec.tone, 'aria-hidden': true }, content);
+  }
+  function IconPicker({ label, entry, t, onPick, close }) {
+    const [text, setText] = React.useState(entry?.kind === 'text' ? entry.value : '');
+    const apply = () => {
+      const value = Array.from(text.trim()).slice(0, 4).join('');
+      if (value) { onPick({ kind: 'text', value }); close(); }
+    };
+    return h(React.Fragment, null,
+      menuItem(t('iconAuto'), () => { onPick(null); close(); }, { role: 'menuitemradio', 'aria-checked': !entry }),
+      h('div', { className: 'dst-menu-separator', role: 'separator' }),
+      h('div', { className: 'dst-menu-heading', role: 'presentation' }, t('iconPresets')),
+      h('div', { className: 'dst-icon-grid', role: 'group', 'aria-label': t('iconPresets') },
+        ...model.PROJECT_ICONS.map(name => h('button', { key: name, type: 'button', role: 'menuitemradio', 'aria-checked': entry?.kind === 'icon' && entry.value === name, 'aria-label': t('icon_' + name), title: t('icon_' + name), className: 'dst-menu-item dst-icon-choice', onClick: () => { onPick({ kind: 'icon', value: name }); close(); } }, h(Icon, { name, size: 16 })))),
+      h('div', { className: 'dst-menu-separator', role: 'separator' }),
+      h('div', { className: 'dst-menu-heading', role: 'presentation' }, t('iconCustom')),
+      h('label', { className: 'dst-menu-field' }, h('span', { className: 'dst-sr-only' }, t('iconCustom')), h('input', { type: 'text', value: text, maxLength: 4, placeholder: t('iconCustomHint'), 'aria-label': t('iconCustom'), onChange: event => setText(event.target.value), onKeyDown: event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); apply(); } } })),
+      menuItem(t('iconApply'), apply, { disabled: !text.trim() }),
+      h('div', { className: 'dst-menu-separator', role: 'separator' }),
+      menuItem(t('iconNone'), () => { onPick({ kind: 'none' }); close(); }, { role: 'menuitemradio', 'aria-checked': entry?.kind === 'none' }));
   }
   function age(time, now, t) {
     const minutes = Math.floor(Math.max(0, now - time) / 60000);
@@ -233,7 +378,7 @@ function createPlugin(React, model, dictionaries, css) {
     return workspace?.title === 'default-workspace' ? t('defaultWorkspace') : workspace?.title || t('ungrouped');
   }
   function rowTitle(row, t) { return row.blank ? t('draft') : row.title || t('untitled'); }
-  function Popover({ label, icon, active, children, align = 'right', className = '', submenu = false, picker = false, value, description }) {
+  function Popover({ label, icon, active, children, align = 'right', className = '', submenu = false, picker = false, value, description, leading }) {
     const [open, setOpen] = React.useState(false);
     const root = React.useRef(null);
     const button = React.useRef(null);
@@ -295,7 +440,7 @@ function createPlugin(React, model, dictionaries, css) {
         if (items.length) { event.preventDefault(); event.stopPropagation(); const index = items.indexOf(document.activeElement); const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length; items[next].focus(); }
       }
     } },
-    submenu ? h('button', { type: 'button', className: 'dst-menu-item dst-submenu-trigger', role: 'menuitem', title: description, onClick: event => { if (event.detail === 0) focusEntry.current = 'first'; setOpen(current => !current); }, ...trigger }, h('span', { className: 'dst-menu-label' }, label), h('span', { className: 'dst-menu-value' }, value, h(Icon, { name: 'chevron', size: 12 }))) : picker ? h('button', { type: 'button', className: 'dst-select-trigger', 'aria-label': label, onClick: event => { if (event.detail === 0) focusEntry.current = 'first'; setOpen(current => !current); }, ...trigger }, value, h('span', { className: 'dst-picker-chevron' }, h(Icon, { name: 'chevron', size: 12 }))) : iconButton(icon, label, () => setOpen(current => !current), trigger),
+    submenu ? h('button', { type: 'button', className: 'dst-menu-item dst-submenu-trigger', role: 'menuitem', title: description, onClick: event => { if (event.detail === 0) focusEntry.current = 'first'; setOpen(current => !current); }, ...trigger }, leading ?? null, h('span', { className: 'dst-menu-label' }, label), h('span', { className: 'dst-menu-value' }, value, h(Icon, { name: 'chevron', size: 12 }))) : picker ? h('button', { type: 'button', className: 'dst-select-trigger', 'aria-label': label, onClick: event => { if (event.detail === 0) focusEntry.current = 'first'; setOpen(current => !current); }, ...trigger }, value, h('span', { className: 'dst-picker-chevron' }, h(Icon, { name: 'chevron', size: 12 }))) : iconButton(icon, label, () => setOpen(current => !current), trigger),
     open && h('div', { id: menuId, ref: menu, popover: 'manual', className: 'dst-menu', style: position, 'data-menu-material': 'translucent', 'data-submenu': submenu, role: 'menu', 'aria-label': label }, children(() => setOpen(false))));
   }
   function menuItem(text, onClick, extra = {}) {
@@ -311,7 +456,7 @@ function createPlugin(React, model, dictionaries, css) {
     const mode = usePrefs(p => p.mode);
     return h('div', { className: 'dst-setting' }, h('div', null, h('div', { className: 'dst-setting-title' }, t('modeLabel')), h('div', { className: 'dst-setting-description' }, t('modeDescription'))), h(Popover, { label: t('modeLabel'), picker: true, value: t(mode) }, close => h(React.Fragment, null, ...['classic', 'modern'].map(value => menuItem(t(value), () => { close(); setMode(value); }, { key: value, role: 'menuitemradio', 'aria-checked': mode === value })))));
   }
-  function SessionRow({ row, selected, compact, now, t, open, openMenu, useContextMenu, act, renameSession, fail, dragging, dropBefore, onDrag, onDragEnd, onDropRow, onDragOverRow }) {
+  function SessionRow({ row, selected, compact, now, t, icon, open, useContextMenu, act, renameSession, fail, dragging, dropBefore, onDrag, onDragEnd, onDropRow, onDragOverRow }) {
     const title = rowTitle(row, t);
     const { getTriggerProps } = useContextMenu();
     const [renaming, setRenaming] = React.useState(false);
@@ -343,8 +488,10 @@ function createPlugin(React, model, dictionaries, css) {
     };
     const snoozeFor = (close, until) => { close(); perform('snooze', until); };
     const nextMorning = () => { const date = new Date(); date.setDate(date.getDate() + 1); date.setHours(9, 0, 0, 0); return date.getTime(); };
-    const project = h('span', { className: 'dst-project' }, h('span', { className: 'dst-project-icon' }, h(Icon, { name: 'folder', size: 12 })), !compact && h('span', { className: 'dst-project-name' }, workspaceName(row.workspace, t)), row.pinned && h(Icon, { name: 'pin', size: 11 }));
-    const timing = h('span', { className: 'dst-row-timing', 'data-tone': row.waiting ? 'warning' : running ? 'running' : row.unread ? 'success' : undefined }, row.snoozedUntil ? h(React.Fragment, null, h(Icon, { name: 'clock', size: 12 }), h('time', { title: new Date(row.snoozedUntil).toLocaleString('en') }, wakeTime(row.snoozedUntil, now))) : status ? h(React.Fragment, null, h(Icon, { name: statusIcon, size: 12 }), t(status)) : h('time', { dateTime: new Date(row.updatedAt).toISOString(), title: new Date(row.updatedAt).toLocaleString('en') }, age(row.updatedAt, now, t)));
+    const project = h('span', { className: 'dst-project' }, h(ProjectIcon, { spec: icon }), !compact && h('span', { className: 'dst-project-name' }, workspaceName(row.workspace, t)), row.pinned && h(Icon, { name: 'pin', size: 11 }));
+    const timing = row.blank ? null : h('span', { className: 'dst-row-timing', 'data-tone': row.waiting ? 'warning' : running ? 'running' : row.unread ? 'success' : row.snoozedUntil ? 'snoozed' : undefined }, row.snoozedUntil ? h(React.Fragment, null, h(Icon, { name: 'clock', size: 12 }), h('time', { title: new Date(row.snoozedUntil).toLocaleString('en') }, wakeTime(row.snoozedUntil, now))) : status ? h(React.Fragment, null, h(Icon, { name: statusIcon, size: 12 }), t(status)) : h('time', { dateTime: new Date(row.updatedAt).toISOString(), title: new Date(row.updatedAt).toLocaleString('en') }, age(row.updatedAt, now, t)));
+    // A draft has nothing to describe: no action strip, no age, and no hover tooltip.
+    const tooltip = row.blank ? undefined : [title, row.cwd, t(row.state)].filter(Boolean).join('\n');
     const controls = !row.blank && h('div', { className: 'dst-row-controls' },
       !row.archived && (parked ? iconButton('undo', t(row.group === 'snoozed' ? 'wake' : 'unsettle'), () => perform('wake'), { disabled: busy }) : h(React.Fragment, null,
         h(Popover, { label: t('snooze'), icon: 'clock', className: 'dst-snooze-menu' }, close => h(React.Fragment, null,
@@ -352,14 +499,13 @@ function createPlugin(React, model, dictionaries, css) {
           h('div', { className: 'dst-menu-separator' }),
           h('label', { className: 'dst-custom-time' }, t('snoozeUntil'), h('input', { type: 'datetime-local', value: customTime, 'aria-label': t('snoozeUntil'), onChange: event => setCustomTime(event.target.value) })),
           menuItem(t('applySnooze'), () => { const until = new Date(customTime).getTime(); if (!Number.isFinite(until) || until <= Date.now()) { fail(new Error(t('invalidTime'))); return; } snoozeFor(close, until); }, { disabled: !customTime || row.waiting || busy }))),
-        h('button', { type: 'button', className: 'dst-settle', title: t('settleSession'), 'aria-label': t('settleSession'), disabled: row.waiting || busy, onClick: () => perform('settle') }, h(Icon, { name: 'check', size: 13 }), !compact && t('settle')))),
-      iconButton('more', t('more'), event => { const box = event.currentTarget.getBoundingClientRect(); openMenu(row, { x: box.left, y: box.bottom }); }, { 'data-context-menu-trigger': '', 'aria-haspopup': 'menu' }));
+        h('button', { type: 'button', className: 'dst-settle', title: t('settleSession'), 'aria-label': t('settleSession'), disabled: row.waiting || busy, onClick: () => perform('settle') }, h(Icon, { name: 'check', size: 13 }), !compact && t('settle')))));
     return h('article', { className: 'dst-row', 'data-session-id': row.id, 'data-selected': selected, 'data-compact': compact, 'data-dragging': dragging === row.id, 'data-drop-before': dropBefore === row.id, draggable: !row.blank && !renaming, ...triggers,
       onDragStart: event => { if (event.target.closest('input')) { event.preventDefault(); return; } event.dataTransfer.setData('text/plain', row.id); event.dataTransfer.effectAllowed = 'move'; onDrag(row.id); },
       onDragEnd, onDragOver: event => { if (dragging && dragging !== row.id) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; onDragOverRow(row.id); } },
       onDrop: event => { if (dragging) { event.preventDefault(); event.stopPropagation(); onDropRow(row); } },
     },
-      h('button', { type: 'button', className: 'dst-open', 'data-session-open': row.id, 'aria-current': selected ? 'page' : undefined, 'aria-label': `${title} · ${t(row.state)}`, title: [title, row.cwd, t(row.state)].filter(Boolean).join('\n'), onClick: () => open(row), onDoubleClick: startRename },
+      h('button', { type: 'button', className: 'dst-open', 'data-session-open': row.id, 'aria-current': selected ? 'page' : undefined, 'aria-label': row.blank ? title : `${title} · ${t(row.state)}`, title: tooltip, onClick: () => open(row), onDoubleClick: startRename },
         compact ? h('span', { className: 'dst-slim-content' }, project, h('span', { className: 'dst-title' }, title), timing) : h(React.Fragment, null,
           h('span', { className: 'dst-project-line' }, project, timing),
           h('span', { className: 'dst-title', 'data-renaming': renaming }, title),
@@ -368,7 +514,7 @@ function createPlugin(React, model, dictionaries, css) {
       controls);
   }
   function Browser(props) {
-    const { wide, expandSidebar, usePrefs, useSaveError, useSessions, useWorkspaces, useSessionStatus, usePanelInfo, useRemoteAccess, useContextMenu, setView, setMode, openSession, startSession, openMenu, searchSessions, renameSession, setPinned, addWorkspace, t } = props;
+    const { wide, expandSidebar, usePrefs, useSaveError, useSessions, useWorkspaces, useSessionStatus, usePanelInfo, useRemoteAccess, useContextMenu, setView, setMode, openSession, startSession, searchSessions, renameSession, setPinned, addWorkspace, t } = props;
     const preferences = usePrefs(identity);
     const saveError = useSaveError(identity);
     const list = useSessions(identity);
@@ -409,18 +555,18 @@ function createPlugin(React, model, dictionaries, css) {
     React.useEffect(() => {
       const previous = previousRows.current;
       previousRows.current = rows;
-      if (previous) setView(p => model.recordReturns(p, previous, rows, Date.now()));
-    }, [rows, setView]);
+      if (previous) setView(p => model.recordCompletions(model.recordReturns(p, previous, rows, Date.now()), previous, rows, current, Date.now()));
+    }, [rows, setView, current]);
     React.useEffect(() => {
       const waking = rows.filter(row => row.pendingWake);
       if (waking.length) setView(p => waking.reduce((next, row) => model.wake(next, row), p));
     }, [rows, setView]);
     const open = row => {
       if (row.archived) { setNote({ text: t('restoreFirst'), error: true }); return; }
+      if (preferences.done?.[row.id] !== undefined) setView(p => { const done = { ...(p.done ?? {}) }; delete done[row.id]; return { ...p, done }; });
       openSession(row.id);
     };
     const act = async (kind, row, value) => {
-      const before = preferences;
       const wasPinned = row.pinned;
       try {
         if (['settle', 'snooze'].includes(kind) && row.waiting) return;
@@ -429,22 +575,6 @@ function createPlugin(React, model, dictionaries, css) {
         else if (kind === 'settle') setView(p => model.settle(p, row, Date.now()));
         else if (kind === 'snooze') setView(p => model.snooze(p, row, value));
         else setView(p => ({ ...model.wake(p, row), returnedAt: { ...p.returnedAt, [row.id]: Date.now() } }));
-        setNote({ text: t(kind === 'settle' ? 'settledNotice' : kind === 'snooze' ? 'snoozedNotice' : kind === 'pin' ? 'pinNotice' : 'wakeNotice'), undo: async () => {
-          try {
-            if (kind === 'pin' && !wasPinned) await setPinned(row.id, false);
-            if (wasPinned && ['settle', 'snooze', 'active'].includes(kind)) await setPinned(row.id, true);
-            setView(p => {
-              const restored = { ...p };
-              for (const key of ['settled', 'settledAt', 'snoozed', 'awakened', 'returnedAt']) {
-                restored[key] = { ...(p[key] || {}) };
-                if (before[key]?.[row.id] === undefined) delete restored[key][row.id]; else restored[key][row.id] = before[key][row.id];
-              }
-              return restored;
-            });
-            if (row.id === current) openSession(row.id);
-            setNote(null);
-          } catch (error) { fail(error); }
-        } });
         if (['settle', 'snooze'].includes(kind) && row.id === latest.current.current && !latest.current.panelActive) {
           const next = model.nextSession(latest.current.visible, row.id);
           if (next) openSession(next); else if (canCreate) startSession(project && project !== '*' ? project : undefined);
@@ -466,12 +596,39 @@ function createPlugin(React, model, dictionaries, css) {
       if (group === 'settled') await act('settle', row);
       if (group === 'snoozed') await act('snooze', row, Date.now() + 3600000);
     };
-    const rowElement = (row, compact = false) => h(SessionRow, { key: row.id, row, compact, selected: !panelActive && row.id === current, now, t, open, openMenu, useContextMenu, act, renameSession, fail, dragging, dropBefore, onDrag: setDragging, onDragEnd: clearDrag, onDragOverRow: setDropBefore, onDropRow: destination => dropInto(destination.group, destination.id) });
+    const projectSeeds = React.useMemo(() => {
+      const grouped = new Map();
+      for (const row of rows) {
+        const key = model.projectKeyFor(row);
+        if (key) grouped.set(key, [...(grouped.get(key) ?? []), row]);
+      }
+      const map = new Map();
+      for (const workspace of workspaces.items) if (workspace.path) map.set(`workspace:${workspace.workspaceId}`, workspace.path);
+      for (const [key, members] of grouped) if (!map.has(key)) { const seed = model.dominantProjectSeed(members); if (seed) map.set(key, seed); }
+      return map;
+    }, [rows, workspaces.items]);
+    const projectEntries = React.useMemo(() => {
+      const items = workspaces.items.map(workspace => ({ key: `workspace:${workspace.workspaceId}`, label: workspaceName(workspace, t), seedRow: { workspace, projectSeed: projectSeeds.get(`workspace:${workspace.workspaceId}`) } }));
+      const seen = new Set(items.map(item => item.key));
+      for (const row of rows) {
+        const key = model.projectKeyFor(row);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        items.push({ key, label: String(row.cwd ?? '').replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).at(-1) || t('ungrouped'), seedRow: { cwd: row.cwd, projectSeed: projectSeeds.get(key) } });
+      }
+      return items;
+    }, [rows, workspaces.items, projectSeeds, t]);
+    const setProjectIcon = (key, entry) => setView(p => {
+      const next = { ...(p.projectIcons ?? {}) };
+      if (entry) next[key] = entry; else delete next[key];
+      return { ...p, projectIcons: next };
+    });
+    const rowElement = (row, compact = false) => h(SessionRow, { key: row.id, row, compact, icon: model.projectIcon(preferences, row, projectSeeds.get(model.projectKeyFor(row))), selected: !panelActive && row.id === current, now, t, open, useContextMenu, act, renameSession, fail, dragging, dropBefore, onDrag: setDragging, onDragEnd: clearDrag, onDragOverRow: setDropBefore, onDropRow: destination => dropInto(destination.group, destination.id) });
     const groupZone = (key, children) => h('section', { key, className: 'dst-top-group', 'data-drop-group': key, 'aria-label': t(key), onDragOver: event => { if (dragging) event.preventDefault(); }, onDrop: event => { if (dragging) { event.preventDefault(); dropInto(key); } } }, h('h3', { className: dragging ? 'dst-drag-label' : 'dst-sr-only' }, t(key)), children);
     const shelf = key => {
       const members = visible.filter(row => row.group === key);
       if (!members.length && !((key === 'settled' && visible.length > 0 && !archived) || (dragging && ['snoozed', 'settled'].includes(key)))) return null;
-      const expanded = preferences.collapsed[key] === false;
+      const expanded = key === 'working' ? preferences.collapsed[key] !== true : preferences.collapsed[key] === false;
       const shown = model.shelfRows(visible, key, panelActive ? null : current, expanded);
       return h('section', { key, className: 'dst-shelf', 'aria-label': t(key), onDragOver: event => { if (dragging && key !== 'working') event.preventDefault(); }, onDrop: event => { if (dragging && key !== 'working') { event.preventDefault(); dropInto(key); } } },
         h('button', { type: 'button', className: 'dst-shelf-heading', 'aria-expanded': expanded, onClick: () => setView(p => ({ ...p, collapsed: { ...p.collapsed, [key]: expanded } })) }, h('span', null, t(key)), h('span', { className: 'dst-shelf-count' }, members.length), h('span', { className: 'dst-shelf-chevron', 'data-expanded': expanded }, h(Icon, { name: 'chevron', size: 12 }))),
@@ -479,7 +636,12 @@ function createPlugin(React, model, dictionaries, css) {
     };
     const currentSearch = visible[Math.min(searchIndex, Math.max(0, visible.length - 1))];
     const projectScope = h(Popover, { label: t('projects'), icon: 'filter', active: project !== '*', align: 'right' }, close => h(React.Fragment, null,
-      ...[{ workspaceId: '*', title: t('allProjects') }, ...workspaces.items, { workspaceId: '', title: t('ungrouped') }].map(workspace => menuItem(workspaceName(workspace, t), () => { setProject(workspace.workspaceId); close(); }, { key: workspace.workspaceId, role: 'menuitemradio', 'aria-checked': project === workspace.workspaceId }))));
+      ...[{ workspaceId: '*', title: t('allProjects') }, ...workspaces.items, { workspaceId: '', title: t('ungrouped') }].map(workspace => {
+        const id = workspace.workspaceId;
+        const spec = id === '*' ? null : id === '' ? model.projectIcon(preferences, { cwd: rows.find(row => !row.workspace)?.cwd }) : model.projectIcon(preferences, { workspace, projectSeed: projectSeeds.get(`workspace:${id}`) });
+        const label = id === '*' ? t('allProjects') : workspaceName(workspace, t);
+        return menuItem(spec ? h(React.Fragment, null, h(ProjectIcon, { spec }), h('span', null, label)) : label, () => { setProject(id); close(); }, { key: id, role: 'menuitemradio', 'aria-checked': project === id });
+      })));
     if (!wide) return h('div', { className: 'dst-root dst-rail' }, iconButton('inbox', t('expand'), expandSidebar));
     return h('section', { ref: rootRef, className: 'dst-root', 'aria-label': t('sessions'), 'data-session-triage': 'modern', lang: 'en', onKeyDown: event => {
       if (!['ArrowUp', 'ArrowDown'].includes(event.key) || event.target.closest('input,select,[role="menu"]')) return;
@@ -495,7 +657,6 @@ function createPlugin(React, model, dictionaries, css) {
         } }), q && iconButton('close', t('clear'), () => { setQuery(''); searchRef.current?.focus(); })),
         projectScope,
         iconButton('folderPlus', t('addWorkspace'), async () => { try { const workspace = await addWorkspace(); if (workspace) { setProject(workspace.workspaceId); startSession(workspace.workspaceId); } } catch (error) { fail(error); } }),
-        canCreate && iconButton('compose', t('new'), () => startSession(project && project !== '*' ? project : undefined)),
         h(Popover, { label: t('options'), icon: 'more' }, close => h(React.Fragment, null,
           menuItem(t('workingSection'), () => setView(p => ({ ...p, workingSection: !p.workingSection })), { role: 'menuitemcheckbox', 'aria-checked': preferences.workingSection }),
           menuItem(t('showArchived'), () => { setArchived(value => !value); close(); }, { role: 'menuitemcheckbox', 'aria-checked': archived }),
@@ -505,8 +666,11 @@ function createPlugin(React, model, dictionaries, css) {
           h('div', { className: 'dst-menu-separator', role: 'separator' }),
           h(Popover, { label: t('autoSettle'), submenu: true, description: t('localHint'), value: t(({ 0: 'never', 6: 'sixHours', 24: 'oneDay', 72: 'threeDays', 168: 'oneWeek' })[preferences.autoSettleHours]) }, closeSubmenu => h(React.Fragment, null,
             ...[[0, 'never'], [6, 'sixHours'], [24, 'oneDay'], [72, 'threeDays'], [168, 'oneWeek']].map(([value, key]) => menuItem(t(key), () => { setView(p => ({ ...p, autoSettleHours: value })); closeSubmenu(); close(); }, { key, role: 'menuitemradio', 'aria-checked': preferences.autoSettleHours === value })))),
+          h('div', { className: 'dst-menu-separator', role: 'separator' }),
+          h(Popover, { label: t('icons'), submenu: true }, closeIcons => h(React.Fragment, null,
+            ...(projectEntries.length ? projectEntries.map(entry => h(Popover, { key: entry.key, label: entry.label, submenu: true, leading: h(ProjectIcon, { spec: model.projectIcon(preferences, entry.seedRow) }) }, closePicker => h(IconPicker, { label: entry.label, entry: preferences.projectIcons?.[entry.key], t, onPick: value => setProjectIcon(entry.key, value), close: () => { closePicker(); closeIcons(); close(); } }))) : [h('div', { key: 'empty', className: 'dst-menu-heading', role: 'presentation' }, t('empty'))]))),
           h('div', { className: 'dst-menu-separator', role: 'separator' }), menuItem(t('switchClassic'), () => { close(); setMode('classic'); })))),
-      (project !== '*' || archived) && h('div', { className: 'dst-scope-line' }, h('span', null, archived ? t('archived') : workspaceName(workspaces.items.find(item => item.workspaceId === project), t)), iconButton('close', t('clear'), () => { setProject('*'); setArchived(false); })),
+      (project !== '*' || archived) && h('div', { className: 'dst-scope-line' }, h('span', null, !archived && h(ProjectIcon, { spec: project === '' ? model.projectIcon(preferences, { cwd: rows.find(row => !row.workspace)?.cwd }) : model.projectIcon(preferences, { workspace: workspaces.items.find(item => item.workspaceId === project), projectSeed: projectSeeds.get(`workspace:${project}`) }) }), archived ? t('archived') : workspaceName(workspaces.items.find(item => item.workspaceId === project), t)), iconButton('close', t('clear'), () => { setProject('*'); setArchived(false); })),
       saveError && h('div', { role: 'status', className: 'dst-notice dst-error' }, t('storageError')),
       note && h('div', { role: note.error ? 'alert' : 'status', className: 'dst-notice', 'data-error': note.error }, h('span', null, note.text), note.undo && h('button', { type: 'button', onClick: note.undo }, t('undo')), iconButton('close', t('close'), () => setNote(null))),
       q && remote.phase === 'loading' && h('div', { className: 'dst-search-note', role: 'status' }, t('searching')),
@@ -515,19 +679,18 @@ function createPlugin(React, model, dictionaries, css) {
         q ? h('section', { 'aria-label': t('results'), className: 'dst-search-results' }, ...visible.map((row, index) => h('div', { key: row.id, 'data-search-selected': index === searchIndex }, rowElement(row, true))), !visible.length && h('p', { className: 'dst-empty' }, t(list.phase !== 'ready' ? 'loading' : 'noMatch')), remote.hasMore && h('p', { className: 'dst-search-note' }, t('limited', { n: remote.items.length }))) : h(React.Fragment, null,
           (visible.some(row => row.group === 'pinned') || dragging) && groupZone('pinned', visible.filter(row => row.group === 'pinned').map(row => rowElement(row))),
           groupZone('active', visible.filter(row => row.group === 'active').map(row => rowElement(row))),
-          visible.length === 0 && h('div', { className: 'dst-empty' }, t(list.phase !== 'ready' ? 'loading' : 'empty'), canCreate && h('button', { type: 'button', className: 'dst-empty-action', onClick: () => startSession(project && project !== '*' ? project : undefined) }, t('new'))),
+          visible.length === 0 && h('div', { className: 'dst-empty' }, t(list.phase !== 'ready' ? 'loading' : 'empty')),
           h('div', { className: 'dst-shelves' }, ...['working', 'snoozed', 'settled', 'archived'].map(shelf))))
     );
   }
   return {
-    inject: ['slots', 'locale', 'uiWorkspace', 'sessions', 'contextMenus', 'workspaces'],
+    inject: ['slots', 'locale', 'uiWorkspace', 'sessions', 'workspaces'],
     apply(ctx) {
       try {
         const slots = ctx.get('slots');
         const locale = ctx.get('locale');
         const navigation = ctx.get('uiWorkspace');
         const sessions = ctx.get('sessions');
-        const menus = ctx.get('contextMenus');
         const workspaceStore = ctx.get('workspaces');
         ctx.effect(() => slots.onEntryError((slot, entry, error) => {
           if ([Browser, ModeButton, Setting].includes(entry.component)) console.error('[session-triage] render failed in ' + slot, error instanceof Error ? error.stack : String(error));
@@ -572,7 +735,6 @@ function createPlugin(React, model, dictionaries, css) {
               inject: () => ({ ...injected(),
                 openSession: id => navigation.openSession(id),
                 startSession: workspace => navigation.startSession(workspace),
-                openMenu: (row, point) => menus.open({ kind: 'session', value: { sessionId: row.id, displayTitle: row.title } }, point),
                 setPinned: (id, value) => value ? workspaceStore.pinSession(id) : workspaceStore.unpinSession(id),
                 addWorkspace: async () => { const path = await navigation.pickDirectory(); return path ? workspaceStore.create({ path }) : null; },
                 renameSession: (id, title) => sessions.using(id, { source: 'controllerOperation' }, async reference => { await reference.ready; const result = await reference.binding.session.rename(title); if (!result.ok) throw new Error(result.error.message); }),
@@ -593,6 +755,6 @@ function createPlugin(React, model, dictionaries, css) {
   };
 }
 
-return createPlugin(React, model, {"en":{"meta":{"title":"Session inbox","description":"A T3 Code inspired sidebar with a focused active list, pinned sessions, and Working, Snoozed and Settled shelves."},"sessions":"Sessions","search":"Search","searchLabel":"Search sessions","clear":"Clear search","new":"New session","addWorkspace":"Add workspace","projects":"Filter by workspace","allProjects":"All workspaces","defaultWorkspace":"Default workspace","ungrouped":"No workspace","options":"Sidebar options","classic":"Classic","modern":"Inbox","switchClassic":"Switch to classic sidebar","switchModern":"Switch to inbox sidebar","modeLabel":"Session sidebar","modeDescription":"A focused active list with compact shelves for background and finished work.","pinned":"Pinned","active":"Active","working":"Working","snoozed":"Snoozed","settled":"Settled","archived":"Archived","approval":"Approve","question":"Needs input","plan-review":"Review plan","running":"Working","children":"Subagents working","unread":"Done","draft":"New session","idle":"Idle","untitled":"Untitled session","more":"More actions","settle":"Settle","settleSession":"Settle session","unsettle":"Unsettle","wake":"Wake now","snooze":"Snooze session","pin":"Pin session","unpin":"Unpin session","oneHour":"In 1 hour","threeHours":"In 3 hours","tomorrow":"Tomorrow morning","nextWeek":"Next week","pickTime":"Choose date and time…","snoozeUntil":"Snooze until","applySnooze":"Snooze","cancel":"Cancel","empty":"Nothing to catch up on","emptyHint":"Start a session to get going.","noMatch":"No matching sessions","loading":"Loading sessions…","searching":"Searching conversation content…","searchFailed":"Content search is unavailable. Titles and workspaces are still searchable.","restoreFirst":"Unarchive this session from its menu before opening it.","autoSettle":"Auto-settle after","never":"Never","sixHours":"6 hours","oneDay":"1 day","threeDays":"3 days","oneWeek":"1 week","workingSection":"Show Working shelf","showArchived":"Show archived sessions","sort":"Active session order","newest":"Newest first","oldest":"Oldest first","manageWorkspaces":"Manage workspaces…","localHint":"Settle and snooze organize this browser. Running agents keep going.","storageError":"Preferences could not be saved. Changes apply to this window only.","failed":"Could not complete the action","settledNotice":"Session settled","snoozedNotice":"Session snoozed","pinNotice":"Session pinned","wakeNotice":"Session moved to Active","undo":"Undo","close":"Dismiss","results":"Search results","limited":"Showing the first {n} content matches.","now":"now","minutes":"{n}m","hours":"{n}h","days":"{n}d","expand":"Expand sidebar","nextSession":"Next session","previousSession":"Previous session","dropActive":"Move to Active","dropPinned":"Pin session","dropSettled":"Settle session","dropSnoozed":"Snooze for 1 hour","rename":"Rename session","renameHint":"Enter to save · Esc to cancel","invalidTime":"Choose a time in the future."},"zh":{"meta":{"title":"会话收件箱","description":"参考 T3 Code 的扁平会话列表与 Working、Snoozed、Settled 底部收纳区。本版界面优先使用英文，可切回原生侧栏。"}}}, ".dst-root{display:flex;flex:1;flex-direction:column;position:relative;min-height:0;min-width:0;color:var(--dsw-alias-label-primary);font:12px/1.5 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;isolation:isolate}\n.dst-root *,.dst-setting *{box-sizing:border-box}\n.dst-root button,.dst-root input,.dst-root select,.dst-toggle,.dst-setting select{font:inherit;color:inherit}\n.dst-root button,.dst-toggle{cursor:pointer}\n.dst-root button:disabled{cursor:default;opacity:.4}\n.dst-root button:focus-visible,.dst-root input:focus-visible,.dst-root select:focus-visible,.dst-toggle:focus-visible,.dst-setting select:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}\n.dst-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}\n.dst-toolbar{display:flex;align-items:center;gap:1px;flex:none;padding:6px 8px 8px;z-index:30}\n.dst-search-wrap{height:32px;display:flex;align-items:center;gap:7px;flex:1;min-width:44px;padding:0 7px;border-radius:6px;color:var(--dsw-alias-label-secondary);background:transparent}\n.dst-search-wrap:hover,.dst-search-wrap:focus-within{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}\n.dst-search-wrap:focus-within{box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2)}\n.dst-search-wrap>svg{flex:none}\n.dst-search{width:100%;min-width:0;height:100%;padding:0;background:transparent;border:0;outline:none!important;font-size:13px!important;font-weight:500}\n.dst-search::placeholder{color:var(--dsw-alias-label-secondary);opacity:1}\n.dst-search::-webkit-search-cancel-button{display:none}\n.dst-glyph{display:block;flex:none}\n.dst-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:27px;height:28px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary)}\n.dst-icon:hover,.dst-icon[data-active=true],.dst-toggle:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}\n.dst-icon[data-active=true]{color:var(--dsw-alias-brand-primary)}\n.dst-search-wrap .dst-icon{width:19px;height:24px}\n.dst-popover{display:inline-flex;position:relative;flex:none}\n/* Match the host's MenuSurface and dense Menu instead of form controls inside a card. */\n.dst-menu{--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);position:fixed;z-index:60;inset:auto;margin:0;width:max-content;min-width:min(240px,calc(100vw - 16px));max-width:min(300px,calc(100vw - 16px));max-height:min(520px,calc(100vh - 16px));overflow:auto;padding:4px;border:0;border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-menu-surface-fill,var(--dsw-alias-bg-layer-1));backdrop-filter:var(--dsw-menu-backdrop-filter,blur(40px) saturate(150%));color:var(--dsw-alias-label-primary);box-shadow:var(--dsw-elevation-prominent,0 0 0 .5px var(--dsw-alias-border-l2),0 3px 8px #0000000a,0 0 20px #0000000d);font-family:var(--dsw-font-family,inherit);font-size:13px;line-height:20px;cursor:default;isolation:isolate}\n.dst-menu::backdrop{background:transparent}\n.dst-menu[data-submenu=true]{min-width:min(176px,calc(100vw - 16px))}\n.dst-menu-item{display:flex;align-items:center;gap:6px;width:100%;min-height:30px;padding:4px 8px;border:0;border-radius:var(--dsw-radius-md,12px);background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;text-align:left}\n.dst-menu button{font:inherit;color:inherit;cursor:pointer}\n.dst-menu button:disabled{cursor:default;opacity:.4}\n.dst-root .dst-menu .dst-menu-item:focus-visible,.dst-setting .dst-menu .dst-menu-item:focus-visible{outline:none;outline-offset:0;box-shadow:none}\n.dst-menu-item:hover,.dst-menu-item:focus-visible,.dst-submenu-trigger[data-active=true]{background:var(--dsw-alias-interactive-bg-hover)}\n.dst-menu-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.dst-menu-check{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:20px;margin-left:8px;color:var(--dsw-alias-label-primary)}\n.dst-menu-heading{padding:6px 8px;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:15px}\n.dst-submenu{display:flex;width:100%}\n.dst-menu-value{display:inline-flex;align-items:center;gap:8px;flex:none;margin-left:12px;color:var(--dsw-alias-label-secondary);font-size:12px}\n.dst-custom-time{display:flex;flex-direction:column;gap:6px;padding:6px 8px;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:15px}\n.dst-custom-time input{width:100%;min-width:0;min-height:30px;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-primary);font:13px/20px var(--dsw-font-family,inherit)}\n.dst-menu-separator{height:.5px;margin:3px 8px;background:var(--dsw-alias-border-l2)}\n.dst-scope-line{display:flex;align-items:center;justify-content:space-between;gap:6px;margin:0 12px 7px;color:var(--dsw-alias-label-secondary);font-size:11px}\n.dst-scope-line>.dst-icon{width:20px;height:20px}\n.dst-threads{display:flex;flex:1;flex-direction:column;gap:1px;min-height:0;overflow-y:auto;overflow-x:clip;padding:0 8px 7px;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l2) transparent;overscroll-behavior:contain}\n.dst-top-group{flex:none;min-width:0}\n.dst-top-group+.dst-top-group:not(:empty){margin-top:3px}\n.dst-row{position:relative;min-width:0;margin:2px 0;border-radius:6px;background:transparent;transition:background-color .12s;isolation:isolate}\n.dst-row:hover{background:var(--dsw-alias-bg-layer-1)}\n.dst-row[data-selected=true]{background:var(--dsw-alias-bg-layer-2)}\n.dst-row:has(:focus-visible){outline:1px solid var(--dsw-alias-brand-primary);outline-offset:-1px}\n.dst-row:has(.dst-popover[data-open=true]){z-index:45;background:var(--dsw-alias-bg-layer-2)}\n.dst-open{display:flex;flex-direction:column;width:100%;min-width:0;padding:8px 10px;border:0;border-radius:6px;background:transparent;text-align:left;line-height:20px}\n.dst-project-line{display:flex;align-items:center;gap:6px;min-width:0;width:100%;height:20px;color:var(--dsw-alias-label-secondary);font-size:12px}\n.dst-project{display:inline-flex;align-items:center;gap:6px;flex:1;min-width:0;overflow:hidden;color:var(--dsw-alias-label-secondary)}\n.dst-project-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400}\n.dst-project-icon{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;flex:none;border-radius:4px;background:color-mix(in srgb,var(--dsw-alias-brand-primary) 10%,transparent);color:var(--dsw-alias-brand-primary)}\n.dst-project>svg{flex:none;opacity:.7}\n.dst-title{display:block;min-width:0;max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-top:4px;font-size:14px;font-weight:500;line-height:20px;color:var(--dsw-alias-label-primary)}\n.dst-title[data-renaming=true]{visibility:hidden}\n.dst-row-timing{display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;flex:none;min-width:24px;max-width:135px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-secondary);font-size:11px;font-weight:400;line-height:18px;transition:opacity .1s}\n.dst-row-timing[data-tone=warning]{color:var(--dsw-alias-warning-primary);font-weight:500}\n.dst-row-timing[data-tone=running]{color:var(--dsw-alias-brand-primary);font-weight:500}\n.dst-row-timing[data-tone=success]{color:var(--dsw-alias-success-primary);font-weight:500}\n.dst-meta-line{display:flex;align-items:center;gap:6px;min-width:0;width:100%;margin-top:2px;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px}\n.dst-path{display:flex;align-items:center;gap:5px;min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}\n.dst-path>svg{flex:none}\n.dst-snoozed-time,.dst-child-count{display:inline-flex;align-items:center;gap:4px;flex:none;margin-left:auto;font-size:11px;color:var(--dsw-alias-label-secondary)}\n.dst-row-controls{position:absolute;right:5px;top:8px;z-index:3;display:flex;align-items:center;height:20px;background:transparent;opacity:0;pointer-events:none}\n.dst-row-controls>.dst-icon,.dst-row-controls>.dst-popover>.dst-icon{width:23px;height:22px}\n.dst-row:hover .dst-row-controls,.dst-row:has(:focus-visible) .dst-row-controls,.dst-row:has(.dst-popover[data-open=true]) .dst-row-controls{opacity:1;pointer-events:auto;background:var(--dsw-alias-bg-layer-1);border-radius:4px}\n.dst-row[data-selected=true]:hover .dst-row-controls,.dst-row[data-selected=true]:has(:focus-visible) .dst-row-controls,.dst-row:has(.dst-popover[data-open=true]) .dst-row-controls{background:var(--dsw-alias-bg-layer-2)}\n.dst-row:hover .dst-row-timing,.dst-row:has(:focus-visible) .dst-row-timing,.dst-row:has(.dst-popover[data-open=true]) .dst-row-timing{opacity:0}\n.dst-settle{display:inline-flex;align-items:center;justify-content:center;gap:3px;height:22px;padding:0 4px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:11px!important;white-space:nowrap}\n.dst-settle:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}\n.dst-snooze-menu .dst-menu{right:auto}\n.dst-rename{position:absolute;left:8px;right:8px;top:31px;width:calc(100% - 16px);height:25px;padding:0 3px;z-index:6;border:1px solid var(--dsw-alias-brand-primary);border-radius:3px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:14px!important;outline:none}\n.dst-shelves{margin-top:auto;padding-top:14px;flex:none;min-width:0}\n.dst-shelf{min-width:0}\n.dst-shelf-heading{display:flex;align-items:center;gap:7px;width:100%;height:32px;padding:0 10px;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-secondary)!important;text-align:left;font-size:12px!important;font-weight:500}\n.dst-shelf-heading:hover{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)!important}\n.dst-shelf-count{margin-left:auto;font-variant-numeric:tabular-nums;font-weight:400;opacity:.8}\n.dst-shelf-chevron{display:inline-flex;align-items:center;transition:transform .12s}\n.dst-shelf-chevron[data-expanded=true]{transform:rotate(90deg)}\n.dst-shelf[aria-label=Working] .dst-row:not([data-selected=true]){opacity:.72}\n.dst-shelf[aria-label=Working] .dst-row:hover,.dst-shelf[aria-label=Working] .dst-row:has(:focus-visible){opacity:1}\n.dst-row[data-compact=true] .dst-open{height:36px;padding:0 10px;justify-content:center}\n.dst-slim-content{display:flex;align-items:center;gap:8px;width:100%;min-width:0;height:36px}\n.dst-slim-content>.dst-project{flex:none;gap:3px;overflow:visible}\n.dst-slim-content>.dst-title{flex:1;margin-top:0;font-weight:400}\n.dst-slim-content>.dst-row-timing{font-size:11px}\n.dst-row[data-compact=true] .dst-row-controls{top:7px}\n.dst-row[data-compact=true] .dst-rename{top:5px;left:32px;right:8px;width:calc(100% - 40px)}\n.dst-shelf[aria-label=Settled] .dst-row:not(:hover):not([data-selected=true]):not(:has(:focus-visible)){opacity:.6}\n.dst-scope-line span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.dst-search-results{min-width:0}\n[data-search-selected=true]>.dst-row{background:var(--dsw-alias-bg-layer-2)}\n.dst-search-note{flex:none;margin:0;padding:5px 12px;color:var(--dsw-alias-label-secondary);font-size:11px}\n.dst-empty{display:flex;flex-direction:column;align-items:center;gap:8px;flex:none;margin:22px 8px;color:var(--dsw-alias-label-tertiary);font-size:12px;text-align:center}\n.dst-empty-action{padding:3px 8px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-primary)!important;font-size:12px}\n.dst-empty-action:hover{background:var(--dsw-alias-bg-layer-2)}\n.dst-notice{position:absolute;z-index:55;left:9px;right:9px;bottom:8px;display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 3px 8px #0000000a,0 0 20px #0000000d;font-size:11px;line-height:1.5}\n.dst-notice>span{flex:1;min-width:0;overflow-wrap:anywhere}\n.dst-notice>button:not(.dst-icon){border:0;padding:3px 4px;background:transparent;color:var(--dsw-alias-brand-primary);font-weight:500}\n.dst-notice>.dst-icon{height:20px;width:18px}\n.dst-notice[data-error=true],.dst-error{color:var(--dsw-alias-warning-primary)}\n.dst-error{bottom:48px}\n.dst-drag-label{position:absolute;z-index:4;left:3px;right:3px;top:-6px;display:flex;align-items:center;height:12px;margin:0;padding:0 5px;border-top:1px solid var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-secondary);font-size:9px;line-height:10px;font-weight:500}\n.dst-row[data-dragging=true]{opacity:.35}\n.dst-row[data-drop-before=true]::before{content:\"\";position:absolute;z-index:4;left:3px;right:3px;top:-2px;border-top:2px solid var(--dsw-alias-brand-primary)}\n.dst-top-group:has(.dst-drag-label){position:relative;min-height:0}\n.dst-rail{align-items:center;padding-top:9px}\n.dst-toggle{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary)}\n.dst-setting{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:8px 0;color:var(--dsw-alias-label-primary);font-size:13px}\n.dst-setting-title{font-weight:500}\n.dst-setting-description{margin-top:4px;max-width:400px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5}\n.dst-select-trigger{display:inline-flex;align-items:center;justify-content:space-between;gap:12px;min-width:100px;min-height:30px;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;cursor:pointer}\n.dst-select-trigger:hover,.dst-select-trigger[data-active=true]{background:var(--dsw-alias-interactive-bg-hover)}\n.dst-select-trigger:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}\n.dst-picker-chevron{display:inline-flex;transform:rotate(90deg)}\n.dst-spinner{animation:dst-spin 1.15s linear infinite;flex:none}\n@keyframes dst-spin{to{transform:rotate(360deg)}}\n@media(hover:none){.dst-row-controls{opacity:1;pointer-events:auto;background:var(--dsw-alias-bg-layer-1)}.dst-row-timing{visibility:hidden}.dst-slim-content>.dst-row-timing{visibility:visible;margin-right:38px}.dst-row[data-compact=true] .dst-row-controls>.dst-icon{display:none}.dst-row[data-compact=true] .dst-row-controls{right:6px}.dst-row[data-selected=true] .dst-row-controls{background:var(--dsw-alias-bg-layer-2)}}\n@media(prefers-reduced-motion:reduce){.dst-root *{animation-duration:1ms!important;animation-iteration-count:1!important;transition:none!important}}\n");
+return createPlugin(React, model, {"en":{"meta":{"title":"Session inbox","description":"A T3 Code inspired sidebar with a focused active list, pinned sessions, and Working, Snoozed and Settled shelves."},"sessions":"Sessions","search":"Search","searchLabel":"Search sessions","clear":"Clear search","new":"New session","addWorkspace":"Add workspace","projects":"Filter by workspace","allProjects":"All workspaces","defaultWorkspace":"Default workspace","ungrouped":"No workspace","options":"Sidebar options","icons":"Project icons","iconAuto":"Automatic","iconPresets":"Icons","iconCustom":"Custom character","iconCustomHint":"1–4 characters or an emoji","iconApply":"Apply","iconNone":"No icon","icon_folder":"Folder","icon_code":"Code","icon_terminal":"Terminal","icon_package":"Package","icon_book":"Book","icon_spark":"Spark","icon_branch":"Branch","icon_layers":"Layers","classic":"Classic","modern":"Inbox","switchClassic":"Switch to classic sidebar","switchModern":"Switch to inbox sidebar","modeLabel":"Session sidebar","modeDescription":"A focused active list with compact shelves for background and finished work.","pinned":"Pinned","active":"Active","working":"Working","snoozed":"Snoozed","settled":"Settled","archived":"Archived","approval":"Approve","question":"Needs input","plan-review":"Review plan","running":"Working","children":"Subagents working","unread":"Done","draft":"New session","idle":"Idle","untitled":"Untitled session","more":"More actions","settle":"Settle","settleSession":"Settle session","unsettle":"Unsettle","wake":"Wake now","snooze":"Snooze session","pin":"Pin session","unpin":"Unpin session","oneHour":"In 1 hour","threeHours":"In 3 hours","tomorrow":"Tomorrow morning","nextWeek":"Next week","pickTime":"Choose date and time…","snoozeUntil":"Snooze until","applySnooze":"Snooze","cancel":"Cancel","empty":"Nothing to catch up on","emptyHint":"Start a session to get going.","noMatch":"No matching sessions","loading":"Loading sessions…","searching":"Searching conversation content…","searchFailed":"Content search is unavailable. Titles and workspaces are still searchable.","restoreFirst":"Unarchive this session from its menu before opening it.","autoSettle":"Auto-settle after","never":"Never","sixHours":"6 hours","oneDay":"1 day","threeDays":"3 days","oneWeek":"1 week","workingSection":"Show Working shelf","showArchived":"Show archived sessions","sort":"Active session order","newest":"Newest first","oldest":"Oldest first","manageWorkspaces":"Manage workspaces…","localHint":"Settle and snooze organize this browser. Running agents keep going.","storageError":"Preferences could not be saved. Changes apply to this window only.","failed":"Could not complete the action","settledNotice":"Session settled","snoozedNotice":"Session snoozed","pinNotice":"Session pinned","wakeNotice":"Session moved to Active","undo":"Undo","close":"Dismiss","results":"Search results","limited":"Showing the first {n} content matches.","now":"now","minutes":"{n}m","hours":"{n}h","days":"{n}d","expand":"Expand sidebar","nextSession":"Next session","previousSession":"Previous session","dropActive":"Move to Active","dropPinned":"Pin session","dropSettled":"Settle session","dropSnoozed":"Snooze for 1 hour","rename":"Rename session","renameHint":"Enter to save · Esc to cancel","invalidTime":"Choose a time in the future."},"zh":{"meta":{"title":"会话收件箱","description":"参考 T3 Code 的扁平会话列表与 Working、Snoozed、Settled 底部收纳区。本版界面优先使用英文，可切回原生侧栏。"}}}, ".dst-root{display:flex;flex:1;flex-direction:column;position:relative;min-height:0;min-width:0;color:var(--dsw-alias-label-primary);font:12px/1.5 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;isolation:isolate}\n.dst-root *,.dst-setting *{box-sizing:border-box}\n.dst-root button,.dst-root input,.dst-root select,.dst-toggle,.dst-setting select{font:inherit;color:inherit}\n.dst-root button,.dst-toggle{cursor:pointer}\n.dst-root button:disabled{cursor:default;opacity:.4}\n.dst-root button:focus-visible,.dst-root input:focus-visible,.dst-root select:focus-visible,.dst-toggle:focus-visible,.dst-setting select:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}\n.dst-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}\n.dst-toolbar{display:flex;align-items:center;gap:1px;flex:none;padding:6px 8px 8px;z-index:30}\n.dst-search-wrap{height:32px;display:flex;align-items:center;gap:7px;flex:1;min-width:44px;padding:0 7px;border-radius:6px;color:var(--dsw-alias-label-secondary);background:transparent}\n.dst-search-wrap:hover,.dst-search-wrap:focus-within{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}\n.dst-search-wrap:focus-within{box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2)}\n.dst-search-wrap>svg{flex:none}\n.dst-search{width:100%;min-width:0;height:100%;padding:0;background:transparent;border:0;outline:none!important;font-size:13px!important;font-weight:500}\n.dst-search::placeholder{color:var(--dsw-alias-label-secondary);opacity:1}\n.dst-search::-webkit-search-cancel-button{display:none}\n.dst-glyph{display:block;flex:none}\n.dst-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:27px;height:28px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary)}\n.dst-icon:hover,.dst-icon[data-active=true],.dst-toggle:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}\n.dst-icon[data-active=true]{color:var(--dsw-alias-brand-primary)}\n.dst-search-wrap .dst-icon{width:19px;height:24px}\n.dst-popover{display:inline-flex;position:relative;flex:none}\n/* Match the host's MenuSurface and dense Menu instead of form controls inside a card. */\n.dst-menu{--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);position:fixed;z-index:60;inset:auto;margin:0;width:max-content;min-width:min(240px,calc(100vw - 16px));max-width:min(300px,calc(100vw - 16px));max-height:min(520px,calc(100vh - 16px));overflow:auto;padding:4px;border:0;border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-menu-surface-fill,var(--dsw-alias-bg-layer-1));backdrop-filter:var(--dsw-menu-backdrop-filter,blur(40px) saturate(150%));color:var(--dsw-alias-label-primary);box-shadow:var(--dsw-elevation-prominent,0 0 0 .5px var(--dsw-alias-border-l2),0 3px 8px #0000000a,0 0 20px #0000000d);font-family:var(--dsw-font-family,inherit);font-size:13px;line-height:20px;cursor:default;isolation:isolate}\n.dst-menu::backdrop{background:transparent}\n.dst-menu[data-submenu=true]{min-width:min(176px,calc(100vw - 16px))}\n.dst-menu-item{display:flex;align-items:center;gap:6px;width:100%;min-height:30px;padding:4px 10px;border:0;border-radius:var(--dsw-radius-md,12px);background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;text-align:left}\n.dst-menu button{font:inherit;color:inherit;cursor:pointer}\n.dst-menu button:disabled{cursor:default;opacity:.4}\n.dst-root .dst-menu .dst-menu-item:focus-visible,.dst-setting .dst-menu .dst-menu-item:focus-visible{outline:none;outline-offset:0;box-shadow:none}\n.dst-menu-item:hover,.dst-menu-item:focus-visible,.dst-submenu-trigger[data-active=true]{background:var(--dsw-alias-interactive-bg-hover)}\n.dst-menu-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.dst-menu-item>.dst-menu-label{display:flex;align-items:center;gap:6px}\n.dst-icon-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:2px 8px 6px}\n.dst-icon-choice{justify-content:center;min-height:32px;padding:0}\n.dst-icon-choice[aria-checked=true]{background:var(--dsw-alias-interactive-bg-hover);box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2)}\n.dst-menu-field{display:flex;flex-direction:column;gap:5px;padding:4px 8px;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:15px}\n.dst-menu-field input{width:100%;min-width:0;min-height:30px;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-primary);font:13px/20px var(--dsw-font-family,inherit)}\n.dst-menu-check{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:20px;margin-left:8px;color:var(--dsw-alias-label-primary)}\n.dst-menu-heading{padding:6px 8px;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:15px}\n.dst-submenu{display:flex;width:100%}\n.dst-menu-value{display:inline-flex;align-items:center;gap:8px;flex:none;margin-left:12px;color:var(--dsw-alias-label-secondary);font-size:12px}\n.dst-custom-time{display:flex;flex-direction:column;gap:6px;padding:6px 8px;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:15px}\n.dst-custom-time input{width:100%;min-width:0;min-height:30px;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-primary);font:13px/20px var(--dsw-font-family,inherit)}\n.dst-menu-separator{height:.5px;margin:3px 8px;background:var(--dsw-alias-border-l2)}\n.dst-scope-line{display:flex;align-items:center;justify-content:space-between;gap:6px;margin:0 12px 7px;color:var(--dsw-alias-label-secondary);font-size:11px}\n.dst-scope-line>.dst-icon{width:20px;height:20px}\n.dst-threads{display:flex;flex:1;flex-direction:column;gap:1px;min-height:0;overflow-y:auto;overflow-x:clip;padding:0 8px 7px;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l2) transparent;overscroll-behavior:contain}\n.dst-top-group{flex:none;min-width:0}\n.dst-top-group+.dst-top-group:not(:empty){margin-top:3px}\n.dst-row{position:relative;min-width:0;margin:2px 0;border-radius:6px;background:transparent;transition:background-color .12s;isolation:isolate}\n.dst-row:hover{background:var(--dsw-alias-bg-layer-1)}\n.dst-row[data-selected=true]{background:var(--dsw-alias-bg-layer-2)}\n.dst-row:has(:focus-visible){outline:1px solid var(--dsw-alias-brand-primary);outline-offset:-1px}\n.dst-row:has(.dst-popover[data-open=true]){z-index:45;background:var(--dsw-alias-bg-layer-2)}\n.dst-open{display:flex;flex-direction:column;width:100%;min-width:0;padding:7px 14px;border:0;border-radius:6px;background:transparent;text-align:left;line-height:20px}\n.dst-project-line{display:flex;align-items:center;gap:10px;min-width:0;width:100%;height:22px;color:var(--dsw-alias-label-secondary);font-size:12px}\n.dst-project{display:inline-flex;align-items:center;gap:6px;flex:1;min-width:0;overflow:hidden;color:var(--dsw-alias-label-secondary)}\n.dst-project-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400}\n.dst-project-icon{--dst-tone:#4d8f80;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;flex:none;border-radius:7px;background:color-mix(in srgb,var(--dst-tone) 18%,transparent);color:var(--dst-tone);font-size:8.5px;font-weight:600;line-height:1;letter-spacing:0}\n.dst-project-icon[data-tone=\"0\"]{--dst-tone:#3d8f7c}\n.dst-project-icon[data-tone=\"1\"]{--dst-tone:#4a76b8}\n.dst-project-icon[data-tone=\"2\"]{--dst-tone:#7c62b4}\n.dst-project-icon[data-tone=\"3\"]{--dst-tone:#b06f36}\n.dst-project-icon[data-tone=\"4\"]{--dst-tone:#b1557d}\n.dst-project-icon[data-tone=\"5\"]{--dst-tone:#3d8399}\nbody[data-ds-dark-theme] .dst-project-icon{--dst-tone:#7fbead}\nbody[data-ds-dark-theme] .dst-project-icon[data-tone=\"0\"]{--dst-tone:#6fbfa8}\nbody[data-ds-dark-theme] .dst-project-icon[data-tone=\"1\"]{--dst-tone:#8fb4ee}\nbody[data-ds-dark-theme] .dst-project-icon[data-tone=\"2\"]{--dst-tone:#b3a0ea}\nbody[data-ds-dark-theme] .dst-project-icon[data-tone=\"3\"]{--dst-tone:#e0a878}\nbody[data-ds-dark-theme] .dst-project-icon[data-tone=\"4\"]{--dst-tone:#e79ab8}\nbody[data-ds-dark-theme] .dst-project-icon[data-tone=\"5\"]{--dst-tone:#84c2d6}\n.dst-project-glyph{font-size:8.5px;line-height:1}\n.dst-project-glyph.dst-project-emoji{font-size:11px}\n.dst-project>svg{flex:none;opacity:.7}\n.dst-title{display:block;min-width:0;max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-top:4px;font-size:14px;font-weight:500;line-height:20px;color:var(--dsw-alias-label-primary)}\n.dst-title[data-renaming=true]{visibility:hidden}\n.dst-row-timing{display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;flex:none;min-width:24px;max-width:135px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-secondary);font-size:11px;font-weight:400;line-height:18px;transition:opacity .1s}\n.dst-row-timing[data-tone]{height:18px;padding:0 6px;border-radius:9px;font-weight:600;letter-spacing:.01em}\n.dst-row-timing[data-tone=warning]{color:var(--dsw-alias-state-warn-primary);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 15%,transparent);animation:dst-pulse 1.8s ease-in-out infinite}\n.dst-row-timing[data-tone=running]{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 13%,transparent)}\n.dst-row-timing[data-tone=success]{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 15%,transparent)}\n.dst-row-timing[data-tone=snoozed]{color:var(--dsw-alias-label-secondary);background:color-mix(in srgb,var(--dsw-alias-label-primary) 7%,transparent)}\n@keyframes dst-pulse{0%,100%{opacity:1}50%{opacity:.68}}\n.dst-meta-line{display:flex;align-items:center;gap:6px;min-width:0;width:100%;margin-top:2px;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px}\n.dst-path{display:flex;align-items:center;gap:5px;min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}\n.dst-path>svg{flex:none}\n.dst-snoozed-time,.dst-child-count{display:inline-flex;align-items:center;gap:4px;flex:none;margin-left:auto;font-size:11px;color:var(--dsw-alias-label-secondary)}\n.dst-row-controls{position:absolute;right:8px;top:7px;z-index:3;display:flex;align-items:center;height:20px;background:transparent;opacity:0;pointer-events:none}\n.dst-row-controls>.dst-icon,.dst-row-controls>.dst-popover>.dst-icon{width:23px;height:22px}\n.dst-row:hover .dst-row-controls,.dst-row:has(:focus-visible) .dst-row-controls,.dst-row:has(.dst-popover[data-open=true]) .dst-row-controls{opacity:1;pointer-events:auto;background:var(--dsw-alias-bg-layer-1);border-radius:4px}\n.dst-row[data-selected=true]:hover .dst-row-controls,.dst-row[data-selected=true]:has(:focus-visible) .dst-row-controls,.dst-row:has(.dst-popover[data-open=true]) .dst-row-controls{background:var(--dsw-alias-bg-layer-2)}\n.dst-row:hover .dst-row-timing,.dst-row:has(:focus-visible) .dst-row-timing,.dst-row:has(.dst-popover[data-open=true]) .dst-row-timing{opacity:0}\n.dst-settle{display:inline-flex;align-items:center;justify-content:center;gap:3px;height:22px;padding:0 4px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:11px!important;white-space:nowrap}\n.dst-settle:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}\n.dst-snooze-menu .dst-menu{right:auto}\n.dst-rename{position:absolute;left:12px;right:12px;top:33px;width:calc(100% - 24px);height:25px;padding:0 3px;z-index:6;border:1px solid var(--dsw-alias-brand-primary);border-radius:3px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:14px!important;outline:none}\n.dst-shelves{margin-top:auto;padding-top:14px;flex:none;min-width:0}\n.dst-shelf{min-width:0}\n.dst-shelf-heading{display:flex;align-items:center;gap:7px;width:100%;height:32px;padding:0 10px;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-secondary)!important;text-align:left;font-size:12px!important;font-weight:500}\n.dst-shelf-heading:hover{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)!important}\n.dst-shelf-count{margin-left:auto;font-variant-numeric:tabular-nums;font-weight:400;opacity:.8}\n.dst-shelf-chevron{display:inline-flex;align-items:center;transition:transform .12s}\n.dst-shelf-chevron[data-expanded=true]{transform:rotate(90deg)}\n.dst-shelf[aria-label=Working] .dst-row:not([data-selected=true]){opacity:.72}\n.dst-shelf[aria-label=Working] .dst-row:hover,.dst-shelf[aria-label=Working] .dst-row:has(:focus-visible){opacity:1}\n.dst-row[data-compact=true] .dst-open{height:36px;padding:0 14px;justify-content:center}\n.dst-slim-content{display:flex;align-items:center;gap:8px;width:100%;min-width:0;height:36px}\n.dst-slim-content>.dst-project{flex:none;gap:7px;overflow:visible}\n.dst-slim-content>.dst-title{flex:1;margin-top:0;font-weight:400}\n.dst-slim-content>.dst-row-timing{font-size:11px}\n.dst-row[data-compact=true] .dst-row-controls{top:7px}\n.dst-row[data-compact=true] .dst-rename{top:5px;left:44px;right:14px;width:calc(100% - 58px)}\n.dst-shelf[aria-label=Settled] .dst-row:not(:hover):not([data-selected=true]):not(:has(:focus-visible)){opacity:.6}\n.dst-scope-line span{display:inline-flex;align-items:center;gap:6px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.dst-search-results{min-width:0}\n[data-search-selected=true]>.dst-row{background:var(--dsw-alias-bg-layer-2)}\n.dst-search-note{flex:none;margin:0;padding:5px 12px;color:var(--dsw-alias-label-secondary);font-size:11px}\n.dst-empty{display:flex;flex-direction:column;align-items:center;gap:8px;flex:none;margin:22px 8px;color:var(--dsw-alias-label-tertiary);font-size:12px;text-align:center}\n.dst-notice{position:absolute;z-index:55;left:9px;right:9px;bottom:8px;display:flex;align-items:center;gap:8px;padding:8px 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 3px 8px #0000000a,0 0 20px #0000000d;font-size:11px;line-height:1.5}\n.dst-notice>span{flex:1;min-width:0;overflow-wrap:anywhere}\n.dst-notice>button:not(.dst-icon){border:0;padding:3px 4px;background:transparent;color:var(--dsw-alias-brand-primary);font-weight:500}\n.dst-notice>.dst-icon{height:20px;width:18px}\n.dst-notice[data-error=true],.dst-error{color:var(--dsw-alias-warning-primary)}\n.dst-error{bottom:48px}\n.dst-drag-label{position:absolute;z-index:4;left:3px;right:3px;top:-6px;display:flex;align-items:center;height:12px;margin:0;padding:0 5px;border-top:1px solid var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-secondary);font-size:9px;line-height:10px;font-weight:500}\n.dst-row[data-dragging=true]{opacity:.35}\n.dst-row[data-drop-before=true]::before{content:\"\";position:absolute;z-index:4;left:3px;right:3px;top:-2px;border-top:2px solid var(--dsw-alias-brand-primary)}\n.dst-top-group:has(.dst-drag-label){position:relative;min-height:0}\n.dst-rail{align-items:center;padding-top:9px}\n.dst-toggle{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary)}\n/* Share the native footer row: place the mode toggle at the right of the host's \"更多\" entry\n   instead of letting the footer-action list claim a row of its own. */\n[class*=\"footArea\"]{position:relative}\n[class*=\"footerActions\"]:has(.dst-toggle){height:0;min-height:0;padding:0;overflow:visible}\n/* Reserve the toggle's corner so the host entry's paint area ends before it. */\n[class*=\"footArea\"]:has(.dst-toggle) [class*=\"settingsArea\"] button{max-width:calc(100% - 40px)}\n.dst-toggle{position:absolute;right:6px;bottom:6px;z-index:6;width:30px;height:30px}\n.dst-setting{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:8px 0;color:var(--dsw-alias-label-primary);font-size:13px}\n.dst-setting-title{font-weight:500}\n.dst-setting-description{margin-top:4px;max-width:400px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5}\n.dst-select-trigger{display:inline-flex;align-items:center;justify-content:space-between;gap:12px;min-width:100px;min-height:30px;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;cursor:pointer}\n.dst-select-trigger:hover,.dst-select-trigger[data-active=true]{background:var(--dsw-alias-interactive-bg-hover)}\n.dst-select-trigger:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}\n.dst-picker-chevron{display:inline-flex;transform:rotate(90deg)}\n.dst-spinner{flex:none;transform-box:view-box;transform-origin:center;animation:dst-spin 1.15s linear infinite;will-change:transform}\n@keyframes dst-spin{to{transform:rotate(360deg)}}\n@media(hover:none){.dst-row-controls{opacity:1;pointer-events:auto;background:var(--dsw-alias-bg-layer-1)}.dst-row-timing{visibility:hidden}.dst-slim-content>.dst-row-timing{visibility:visible;margin-right:38px}.dst-row[data-compact=true] .dst-row-controls>.dst-icon{display:none}.dst-row[data-compact=true] .dst-row-controls{right:6px}.dst-row[data-selected=true] .dst-row-controls{background:var(--dsw-alias-bg-layer-2)}}\n@media(prefers-reduced-motion:reduce){.dst-root *:not(.dst-spinner){animation-duration:1ms!important;animation-iteration-count:1!important;transition:none!important}}\n");
  }
 });

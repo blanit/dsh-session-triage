@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, GROUPS, normalizePreferences, deriveRows, filterRows, settle, snooze, wake, shelfRows, nextSession, reorder, recordReturns } from '../src/model.mjs';
+import { DEFAULTS, GROUPS, PROJECT_ICONS, PROJECT_TONES, normalizePreferences, deriveRows, filterRows, settle, snooze, wake, shelfRows, nextSession, reorder, recordReturns, recordCompletions, projectIcon, projectInitials, projectKeyFor, projectSeedFor, projectTone, dominantProjectSeed } from '../src/model.mjs';
 
 const now = Date.UTC(2026, 10, 9, 14);
 const make = (overrides = {}) => ({ id: 'a', title: 'Example', updatedAt: now - 1000, running: false, blank: false, retainedBy: {}, ...overrides });
@@ -209,6 +209,24 @@ test('return tracking invents no baseline or snoozed completion, but observes a 
   assert.equal(recordReturns(DEFAULTS, idle, newCatalogMember, now), DEFAULTS);
 });
 
+test('a run that ends while unread stays Done until the session is opened', () => {
+  const running = derive(listOf(make({ running: true })));
+  assert.equal(running[0].group, 'working');
+  const finished = derive(listOf(make({ running: false })));
+  const marked = recordCompletions(DEFAULTS, running, finished, null, now);
+  assert.deepEqual(marked.done, { a: now });
+  const done = derive(listOf(make({ running: false })), new Map(), marked);
+  assert.equal(done[0].unread, true);
+  assert.equal(done[0].state, 'unread');
+  assert.equal(done[0].group, 'active');
+  const opened = recordCompletions(marked, finished, finished, 'a', now + 1);
+  assert.equal(opened.done.a, undefined);
+  const newer = derive(listOf(make({ running: false, updatedAt: now + 5000 })), new Map(), marked, ws, now + 6000);
+  assert.equal(newer[0].unread, false);
+  const waiting = derive(listOf(make({ running: false })), new Map([['a', { pendingInteraction: { kind: 'approval' } }]]), marked);
+  assert.equal(waiting[0].state, 'approval');
+});
+
 test('corrupt preferences discard invalid data and normalize new view preferences', () => {
   const prefs = normalizePreferences({ mode: 'bad', workingSection: false, returnedAt: { a: Infinity, b: 10 }, activeOrder: ['a', null, 'a', '', 10, 'b'], settled: { a: 'bad', b: 10 }, settledAt: { b: 20 }, autoSettleHours: -1, snoozed: { a: null }, collapsed: { attention: true, working: true, settled: true } });
   assert.equal(prefs.mode, 'modern');
@@ -219,4 +237,43 @@ test('corrupt preferences discard invalid data and normalize new view preference
   assert.deepEqual(prefs.settledAt, { b: 20 });
   assert.deepEqual(prefs.snoozed, {});
   assert.deepEqual(prefs.collapsed, { working: true, settled: true });
+});
+
+test('project icons are generated from the project path and stay stable', () => {
+  const workspace = { workspaceId: 'w1', title: 'default-workspace', path: 'D:\\WorkSpace\\CodeProj\\dsh-session-triage' };
+  const row = { id: 'a', cwd: workspace.path, workspace };
+  assert.equal(projectKeyFor(row), 'workspace:w1');
+  assert.equal(projectSeedFor(row), workspace.path);
+  assert.equal(projectInitials(workspace.path), 'DT');
+  assert.equal(projectInitials('D:\\WorkSpace\\single'), 'S');
+  assert.equal(projectInitials(''), '·');
+  const tone = projectTone(workspace.path);
+  assert.ok(tone >= 0 && tone < PROJECT_TONES);
+  assert.equal(projectTone(workspace.path), tone);
+  assert.deepEqual(projectIcon(DEFAULTS, row), { kind: 'auto', value: 'DT', tone });
+  const ungrouped = { id: 'b', cwd: '/home/me/cetus' };
+  assert.equal(projectKeyFor(ungrouped), 'cwd:/home/me/cetus');
+  assert.deepEqual(projectIcon(DEFAULTS, ungrouped), { kind: 'auto', value: 'C', tone: projectTone('/home/me/cetus') });
+  assert.equal(projectIcon(DEFAULTS, ungrouped, '/home/me/dsh-session-triage').value, 'DT');
+  assert.equal(dominantProjectSeed([{ cwd: '/work/alpha', updatedAt: 1 }, { cwd: '/work/alpha', updatedAt: 2 }, { cwd: '/work/beta', updatedAt: 3 }]), '/work/alpha');
+  assert.equal(dominantProjectSeed([]), '');
+});
+
+test('project icon overrides accept presets and custom characters, and reject unknown data', () => {
+  const prefs = normalizePreferences({ projectIcons: {
+    'workspace:w1': { kind: 'icon', value: 'code' },
+    'cwd:/home/me/cetus': { kind: 'text', value: '  🐍🐍🐍🐍🐍  ' },
+    'workspace:w2': { kind: 'icon', value: 'bogus' },
+    'workspace:w3': { kind: 'none' },
+  } });
+  assert.deepEqual(prefs.projectIcons['workspace:w1'], { kind: 'icon', value: 'code' });
+  assert.deepEqual(prefs.projectIcons['cwd:/home/me/cetus'], { kind: 'text', value: '🐍🐍🐍🐍' });
+  assert.equal(prefs.projectIcons['workspace:w2'], undefined);
+  assert.deepEqual(prefs.projectIcons['workspace:w3'], { kind: 'none' });
+  const workspace = { workspaceId: 'w1', path: 'D:\\WorkSpace\\CodeProj\\dsh-session-triage' };
+  assert.equal(projectIcon(prefs, { workspace }).kind, 'icon');
+  assert.equal(projectIcon(prefs, { workspace }).value, 'code');
+  assert.equal(projectIcon(prefs, { cwd: '/home/me/cetus' }).value, '🐍🐍🐍🐍');
+  assert.equal(projectIcon(prefs, { workspace: { workspaceId: 'w3' } }).kind, 'none');
+  assert.deepEqual(PROJECT_ICONS, ['folder', 'code', 'terminal', 'package', 'book', 'spark', 'branch', 'layers']);
 });
